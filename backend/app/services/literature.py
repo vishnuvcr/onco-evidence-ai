@@ -115,43 +115,101 @@ def _normalise(value: str) -> str:
 
 
 def build_search_queries(question: str) -> dict[str, str]:
-    """Build source-specific concept queries from the clinical question."""
+    """Build a focused, field-restricted query from the clinical question."""
     normalised = _normalise(question)
     matched = [
         concept for concept in CONCEPTS
         if any(_normalise(trigger) in normalised for trigger in concept["triggers"])
     ]
-    if matched:
-        pubmed_query = " AND ".join(f"({item['pubmed']})" for item in matched)
-        epmc_query = " AND ".join(f"({item['europe_pmc']})" for item in matched)
-        return {
-            "pubmed": pubmed_query,
-            "europe_pmc": epmc_query,
-            "strategy": (
-                f"Concept-based search: {len(matched)} mapped concept group(s), "
-                "using source-specific synonyms. Discovery strategy only; "
-                "not a validated systematic-review search."
-            ),
-        }
 
-    terms = [
-        token for token in re.findall(r"[A-Za-z0-9-]+", question.lower())
-        if token not in STOPWORDS and len(token) > 2
-    ]
-    terms = list(dict.fromkeys(terms))[:8]
-    if not terms:
-        raise ValueError("The question did not contain searchable topic terms.")
-    pubmed_query = " OR ".join(f'"{term}"[Title/Abstract]' for term in terms)
-    epmc_query = " OR ".join(f'"{term}"' for term in terms)
+    groups_pubmed = [f"({item['pubmed']})" for item in matched]
+    groups_epmc = [f"({item['europe_pmc']})" for item in matched]
+    strategy_parts = []
+
+    if matched:
+        strategy_parts.append(f"{len(matched)} mapped topic concept group(s)")
+
+    # The site is oncology-focused. When radiomics is asked in the context of
+    # radiation oncology/radiotherapy, require both the radiomics concept and
+    # a radiotherapy-domain concept. This prevents a generic radiomics-only
+    # query from returning unrelated diagnostic imaging papers.
+    asks_radiomics = any(_normalise(x) in normalised for x in ("radiomics", "radiomic", "radiogenomics"))
+    asks_radiotherapy_context = any(
+        _normalise(x) in normalised
+        for x in (
+            "radiation oncology", "radiotherapy", "radiation therapy",
+            "radiation treatment", "radiation therapy oncology",
+        )
+    )
+
+    if asks_radiomics and asks_radiotherapy_context:
+        rt_pubmed = (
+            '"radiation oncology"[Title/Abstract] OR '
+            '"radiotherapy"[Title/Abstract] OR '
+            '"radiation therapy"[Title/Abstract] OR '
+            '"radiation treatment"[Title/Abstract] OR '
+            '"Radiotherapy"[MeSH Terms] OR '
+            '"image-guided radiotherapy"[Title/Abstract] OR '
+            '"intensity-modulated radiotherapy"[Title/Abstract] OR '
+            '"intensity modulated radiation therapy"[Title/Abstract] OR '
+            'IMRT[Title/Abstract] OR VMAT[Title/Abstract] OR '
+            'SBRT[Title/Abstract] OR SABR[Title/Abstract] OR '
+            'SRS[Title/Abstract] OR radiosurgery[Title/Abstract] OR '
+            'brachytherapy[Title/Abstract] OR '
+            '"proton therapy"[Title/Abstract] OR '
+            '"stereotactic radiotherapy"[Title/Abstract] OR '
+            'chemoradiotherapy[Title/Abstract]'
+        )
+        rt_epmc = (
+            'TITLE:"radiation oncology" OR ABSTRACT:"radiation oncology" OR '
+            'TITLE:radiotherapy OR ABSTRACT:radiotherapy OR '
+            'TITLE:"radiation therapy" OR ABSTRACT:"radiation therapy" OR '
+            'TITLE:"radiation treatment" OR ABSTRACT:"radiation treatment" OR '
+            'TITLE:"image-guided radiotherapy" OR ABSTRACT:"image-guided radiotherapy" OR '
+            'TITLE:"intensity-modulated radiotherapy" OR ABSTRACT:"intensity-modulated radiotherapy" OR '
+            'TITLE:IMRT OR ABSTRACT:IMRT OR TITLE:VMAT OR ABSTRACT:VMAT OR '
+            'TITLE:SBRT OR ABSTRACT:SBRT OR TITLE:SABR OR ABSTRACT:SABR OR '
+            'TITLE:SRS OR ABSTRACT:SRS OR TITLE:radiosurgery OR ABSTRACT:radiosurgery OR '
+            'TITLE:brachytherapy OR ABSTRACT:brachytherapy OR '
+            'TITLE:"proton therapy" OR ABSTRACT:"proton therapy" OR '
+            'TITLE:"stereotactic radiotherapy" OR ABSTRACT:"stereotactic radiotherapy" OR '
+            'TITLE:chemoradiotherapy OR ABSTRACT:chemoradiotherapy'
+        )
+        groups_pubmed.append(f"({rt_pubmed})")
+        groups_epmc.append(f"({rt_epmc})")
+        strategy_parts.append("radiomics AND radiation-oncology context")
+    elif matched:
+        # Keep mapped concepts together using AND; synonyms remain OR'ed
+        # within each concept group.
+        pass
+
+    if not groups_pubmed:
+        terms = [
+            token for token in re.findall(r"[A-Za-z0-9-]+", question.lower())
+            if token not in STOPWORDS and len(token) > 2
+        ]
+        terms = list(dict.fromkeys(terms))[:8]
+        if not terms:
+            raise ValueError("The question did not contain searchable topic terms.")
+        groups_pubmed = [f"({' OR '.join(f'"{term}"[Title/Abstract]' for term in terms)})"]
+        groups_epmc = [
+            "(" + " OR ".join(
+                f"(TITLE:{term} OR ABSTRACT:{term})" for term in terms
+            ) + ")"
+        ]
+        strategy_parts.append("field-restricted keyword fallback")
+
     return {
-        "pubmed": f"({pubmed_query})",
-        "europe_pmc": f"({epmc_query})",
+        "pubmed": " AND ".join(groups_pubmed),
+        "europe_pmc": " AND ".join(groups_epmc),
         "strategy": (
-            "Broad keyword fallback using OR between extracted topic terms. "
-            "Review the displayed query and refine it for a formal review."
+            "Focused discovery query: " + "; ".join(strategy_parts) +
+            ". Synonyms are OR'ed within concepts and distinct concepts are AND'ed. "
+            "Outcome terms are not mandatory filters, to avoid excluding relevant "
+            "radiotherapy studies that report endpoints using different terminology. "
+            "This is not yet a peer-reviewed systematic-review search strategy."
         ),
     }
-
 
 async def _request_with_retry(
     client: httpx.AsyncClient,
@@ -213,7 +271,10 @@ async def search_pubmed(
     if not ids:
         return [], total
 
-    response = await _request_with_retry(client, "GET", PUBMED_EFETCH, {
+    # NCBI recommends POST for EFetch requests containing more than
+    # about 200 PMIDs. Posting the identifier list avoids HTTP 414 errors
+    # caused by extremely long GET URLs.
+    response = await _request_with_retry(client, "POST", PUBMED_EFETCH, {
         "db": "pubmed", "id": ",".join(ids), "retmode": "xml",
     })
     root = ET.fromstring(response.text)
@@ -366,6 +427,53 @@ def _study_design(record: dict[str, Any], text: str) -> str:
     return "Unclear from abstract"
 
 
+RADIOMICS_MATCH_TERMS = (
+    "radiomics", "radiomic", "radiogenomics", "delta radiomics",
+    "texture analysis", "imaging biomarker", "quantitative imaging",
+)
+RADIOTHERAPY_MATCH_TERMS = (
+    "radiation oncology", "radiotherapy", "radiation therapy",
+    "radiation treatment", "image guided radiotherapy",
+    "intensity modulated radiotherapy", "intensity modulated radiation",
+    "imrt", "vmat", "sbrt", "sabr", "srs", "radiosurgery",
+    "brachytherapy", "proton therapy", "stereotactic radiotherapy",
+    "chemoradiotherapy",
+)
+
+
+def _relevance_assessment(record: dict[str, Any]) -> dict[str, Any]:
+    title = _normalise(record.get("title", ""))
+    abstract = _normalise(record.get("abstract", ""))
+    full_text = f"{title} {abstract}"
+
+    has_radiomics_title = any(term in title for term in RADIOMICS_MATCH_TERMS)
+    has_rt_title = any(term in title for term in RADIOTHERAPY_MATCH_TERMS)
+    has_radiomics = any(term in full_text for term in RADIOMICS_MATCH_TERMS)
+    has_rt = any(term in full_text for term in RADIOTHERAPY_MATCH_TERMS)
+
+    if has_radiomics_title and has_rt_title:
+        tier, rank = "Very high: both concepts in title", 1
+        reasons = ["Radiomics concept in title", "Radiotherapy context in title"]
+    elif has_radiomics and has_rt and (has_radiomics_title or has_rt_title):
+        tier, rank = "High: title + abstract context", 2
+        reasons = ["Both concepts detected; at least one appears in the title"]
+    elif has_radiomics and has_rt:
+        tier, rank = "Moderate: both concepts in abstract", 3
+        reasons = ["Both concepts detected in title/abstract metadata"]
+    elif has_radiomics or has_rt:
+        tier, rank = "Low: one concept detected", 4
+        reasons = ["Only one of the two required concepts was detected in the returned metadata"]
+    else:
+        tier, rank = "Unclear relevance", 5
+        reasons = ["Could not confirm both concepts from title/abstract text"]
+
+    return {
+        "relevance_tier": tier,
+        "relevance_rank": rank,
+        "relevance_reasons": reasons,
+    }
+
+
 def _result_signal(text: str) -> tuple[str, str]:
     lower = text.lower()
     favorable = bool(re.search(
@@ -516,6 +624,7 @@ async def search_all(question: str, limit: int) -> dict[str, Any]:
 
     records = deduplicate(pubmed_records + epmc_records)
     for record in records:
+        record.update(_relevance_assessment(record))
         record.update(appraise_abstract(record))
 
     signal_order = {
@@ -526,6 +635,7 @@ async def search_all(question: str, limit: int) -> dict[str, Any]:
         "Unclear from abstract": 4,
     }
     records.sort(key=lambda item: (
+        item.get("relevance_rank", 99),
         item.get("design_rank", 99),
         signal_order.get(item.get("result_signal", ""), 5),
         -(int(item.get("year") or 0)),
