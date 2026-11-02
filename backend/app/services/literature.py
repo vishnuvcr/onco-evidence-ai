@@ -478,6 +478,77 @@ def _relevance_assessment(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def recommend_appraisal_tool(record: dict[str, Any], design: str) -> dict[str, str]:
+    """Suggest a design-appropriate instrument; this is routing, not an appraisal."""
+    text = _normalise(f"{record.get('title', '')} {record.get('abstract', '')}")
+
+    if design == "Systematic review / meta-analysis":
+        return {
+            "recommended_appraisal_tool": "AMSTAR 2",
+            "appraisal_tool_url": "https://www.amstar.ca/docs/AMSTAR-2.pdf",
+            "appraisal_tool_note": "For systematic reviews of healthcare interventions. It appraises the review, not the included primary studies.",
+        }
+    if design == "Randomized controlled trial":
+        return {
+            "recommended_appraisal_tool": "Cochrane RoB 2",
+            "appraisal_tool_url": "https://www.riskofbias.info/welcome/rob-2-0-tool",
+            "appraisal_tool_note": "Assess a specific result/outcome from the RCT. Select the correct individually randomized, cluster, or crossover variant.",
+        }
+    if design == "Non-randomized interventional study":
+        return {
+            "recommended_appraisal_tool": "ROBINS-I V2 (draft)",
+            "appraisal_tool_url": "https://www.riskofbias.info/welcome/robins-i-v2",
+            "appraisal_tool_note": "The November 2025 V2 release is still a draft and is scoped to follow-up cohort studies; confirm applicability before use.",
+        }
+    if design == "Diagnostic / prediction model study":
+        if any(term in text for term in ("radiomics", "radiomic", "machine learning", "artificial intelligence", "prediction model", "prognostic model", "risk prediction")):
+            return {
+                "recommended_appraisal_tool": "PROBAST+AI",
+                "appraisal_tool_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11931409/",
+                "appraisal_tool_note": "For prediction models using regression or AI. Confirm that the paper is actually developing or validating a prediction model.",
+            }
+        return {
+            "recommended_appraisal_tool": "QUADAS-3",
+            "appraisal_tool_url": "https://www.bristol.ac.uk/population-health-sciences/projects/quadas/quadas-3/quadas-3-tool/",
+            "appraisal_tool_note": "Current diagnostic test accuracy tool. Apply to the diagnostic accuracy estimates and applicability questions.",
+        }
+    if design in ("Prospective cohort study", "Retrospective cohort study"):
+        if any(term in text for term in ("radiotherapy", "radiation therapy", "treatment", "intervention", "chemotherapy", "surgery")):
+            return {
+                "recommended_appraisal_tool": "ROBINS-I V2 (draft; confirm design)",
+                "appraisal_tool_url": "https://www.riskofbias.info/welcome/robins-i-v2",
+                "appraisal_tool_note": "Potentially appropriate for follow-up cohort studies evaluating interventions; V2 remains a draft. Otherwise select a JBI cohort or exposure-specific tool.",
+            }
+        return {
+            "recommended_appraisal_tool": "JBI Cohort Checklist",
+            "appraisal_tool_url": "https://jbi.global/critical-appraisal-tools",
+            "appraisal_tool_note": "Provisional choice for an observational cohort not evaluating an intervention. If the review question concerns an exposure, consider ROBINS-E instead.",
+        }
+    if design in ("Case-control study", "Cross-sectional study", "Case series / case report"):
+        return {
+            "recommended_appraisal_tool": "JBI design-specific checklist",
+            "appraisal_tool_url": "https://jbi.global/critical-appraisal-tools",
+            "appraisal_tool_note": "Choose the matching case-control, analytical cross-sectional, case-series, or case-report checklist after full-text design confirmation.",
+        }
+    if design == "Narrative review / guideline":
+        if "guideline" in text or "recommendation" in text:
+            return {
+                "recommended_appraisal_tool": "AGREE II",
+                "appraisal_tool_url": "https://www.agreetrust.org/agree-ii/",
+                "appraisal_tool_note": "For clinical practice guidelines; verify that the document is a guideline rather than a narrative review.",
+            }
+        return {
+            "recommended_appraisal_tool": "ROBIS / review-type-specific appraisal",
+            "appraisal_tool_url": "https://www.bristol.ac.uk/population-health-sciences/projects/robis/",
+            "appraisal_tool_note": "Confirm the review type and use an instrument designed for that form of evidence synthesis.",
+        }
+    return {
+        "recommended_appraisal_tool": "Manual design confirmation required",
+        "appraisal_tool_url": "https://jbi.global/critical-appraisal-tools",
+        "appraisal_tool_note": "The abstract does not establish a reliable study design. Inspect the full Methods section before selecting an appraisal tool.",
+    }
+
+
 def appraise_abstract(record: dict[str, Any]) -> dict[str, Any]:
     """Return screening metadata only; never infer outcome direction or study quality from abstract wording."""
     abstract = record.get("abstract") or ""
@@ -548,6 +619,7 @@ async def search_all(question: str, limit: int) -> dict[str, Any]:
     for record in records:
         record.update(_relevance_assessment(record))
         record.update(appraise_abstract(record))
+        record.update(recommend_appraisal_tool(record, record.get("study_design", "Unclear from abstract")))
 
     signal_order = {
         "Favorable signal reported": 0,
