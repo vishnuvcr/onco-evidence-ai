@@ -30,6 +30,7 @@ type RecordItem = {
   methodology_signals?: string[];
   methodology_assessment?: string;
   appraisal_scope?: string;
+  full_text_status?: string;
 };
 
 type SearchResult = {
@@ -369,51 +370,42 @@ function StudyCard({ record }: { record: RecordItem }) {
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <div className="mb-3 flex flex-wrap gap-2 text-xs font-semibold">
         <span className="rounded-full bg-teal-50 px-3 py-1 text-teal-900">{record.relevance_tier || "Relevance unclassified"}</span>
-        <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-900">{record.study_design || "Design unclear"}</span>
+        <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-900">{record.study_design || "Design unclear"} · provisional</span>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">{record.year || "Year unavailable"}</span>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">{record.result_signal || "Result unclear"}</span>
+        <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-900">Outcome not appraised</span>
       </div>
       <h3 className="text-base font-semibold leading-snug text-slate-900">{record.title || "Title unavailable"}</h3>
       <p className="mt-2 text-sm text-slate-500">
-        {[record.journal, record.sources?.join(" + ") || record.source, record.sample_size_detected ? `n≈${record.sample_size_detected}` : ""].filter(Boolean).join(" · ")}
+        {[record.journal, record.sources?.join(" + ") || record.source].filter(Boolean).join(" · ")}
       </p>
       {record.relevance_reasons && (
         <p className="mt-2 text-xs text-slate-500">Relevance rationale: {record.relevance_reasons.join(" · ")}</p>
       )}
 
-      <div className="mt-5">
-        <h4 className="text-sm font-semibold text-slate-800">Reported results</h4>
-        <p className="mt-1 text-sm leading-relaxed text-slate-700">{record.results_summary || "No abstract results summary available."}</p>
-        {record.result_signal_note && <p className="mt-1 text-xs text-slate-500">{record.result_signal_note}</p>}
-      </div>
-
-      <div className="mt-5 grid gap-5 md:grid-cols-2">
-        <div>
-          <h4 className="text-sm font-semibold text-slate-800">Strength signals detected</h4>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-600">
-            {(record.strengths || ["Not assessed."]).map((item, index) => <li key={index}>{item}</li>)}
-          </ul>
-        </div>
-        <div>
-          <h4 className="text-sm font-semibold text-slate-800">Limitations / caution flags</h4>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-600">
-            {(record.limitations || ["Not assessed."]).map((item, index) => <li key={index}>{item}</li>)}
-          </ul>
-        </div>
-      </div>
-
-      <div className="mt-5 rounded-xl bg-slate-50 p-4">
-        <h4 className="text-sm font-semibold text-slate-800">Methodology appraisal boundary</h4>
-        <p className="mt-1 text-sm leading-relaxed text-slate-600">{record.methodology_assessment || record.appraisal_scope}</p>
-        {record.methodology_signals && record.methodology_signals.length > 0 && (
-          <p className="mt-2 text-xs text-slate-500">Signals: {record.methodology_signals.join(" · ")}</p>
+      <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <h4 className="text-sm font-semibold text-amber-950">Full-text appraisal pending</h4>
+        <p className="mt-1 text-sm leading-relaxed text-amber-950">
+          This record is currently being shown for literature discovery and relevance screening.
+          We have not yet verified its outcome estimates, strengths, limitations, or risk of bias
+          from the complete article. No favorable or unfavorable conclusion is assigned.
+        </p>
+        {record.full_text_status && (
+          <p className="mt-2 text-xs leading-relaxed text-amber-900">{record.full_text_status}</p>
         )}
+      </div>
+
+      <div className="mt-4 rounded-xl bg-slate-50 p-4">
+        <h4 className="text-sm font-semibold text-slate-800">Study-design classification</h4>
+        <p className="mt-1 text-sm leading-relaxed text-slate-600">
+          {record.study_design || "Not classified"} — provisional classification from available metadata;
+          the Methods section must be checked before selecting a formal appraisal instrument.
+        </p>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-4 text-sm">
         {record.url && <a className="font-semibold text-teal-800 underline" href={record.url} target="_blank" rel="noreferrer">Open publication</a>}
         {record.doi && <a className="text-slate-600 underline" href={`https://doi.org/${record.doi}`} target="_blank" rel="noreferrer">DOI: {record.doi}</a>}
-        {record.pmcid && <a className="text-slate-600 underline" href={`https://pmc.ncbi.nlm.nih.gov/articles/${record.pmcid}/`} target="_blank" rel="noreferrer">Free full text</a>}
+        {record.pmcid && <a className="text-slate-600 underline" href={`https://pmc.ncbi.nlm.nih.gov/articles/${record.pmcid}/`} target="_blank" rel="noreferrer">Open PMC full text (check licence)</a>}
       </div>
     </article>
   );
