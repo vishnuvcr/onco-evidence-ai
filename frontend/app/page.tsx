@@ -12,7 +12,7 @@ type SearchResult = {
   records: RecordItem[]; interpretation: string;
   source_errors: { source: string; error: string }[];
 };
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://onco-evidence-ai.onrender.com";
 
 export default function Home() {
   const [question, setQuestion] = useState("");
