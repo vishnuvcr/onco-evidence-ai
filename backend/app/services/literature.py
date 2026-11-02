@@ -63,7 +63,10 @@ CONCEPTS = [
             'radiogenomics[Title/Abstract] OR "quantitative imaging"[Title/Abstract]'
         ),
         "europe_pmc": (
-            'radiomics OR radiomic OR radiogenomics OR "quantitative imaging"'
+            'TITLE:radiomics OR ABSTRACT:radiomics OR '
+            'TITLE:radiomic OR ABSTRACT:radiomic OR '
+            'TITLE:radiogenomics OR ABSTRACT:radiogenomics OR '
+            'TITLE:"quantitative imaging" OR ABSTRACT:"quantitative imaging"'
         ),
     },
     {
@@ -191,7 +194,8 @@ def build_search_queries(question: str) -> dict[str, str]:
         terms = list(dict.fromkeys(terms))[:8]
         if not terms:
             raise ValueError("The question did not contain searchable topic terms.")
-        groups_pubmed = [f"({' OR '.join(f'"{term}"[Title/Abstract]' for term in terms)})"]
+        pubmed_terms = [f'"{term}"[Title/Abstract]' for term in terms]
+        groups_pubmed = ["(" + " OR ".join(pubmed_terms) + ")"]
         groups_epmc = [
             "(" + " OR ".join(
                 f"(TITLE:{term} OR ABSTRACT:{term})" for term in terms
