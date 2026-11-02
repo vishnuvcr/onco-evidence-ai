@@ -15,6 +15,9 @@ type RecordItem = {
   sources?: string[];
   source: string;
   url: string;
+  relevance_tier?: string;
+  relevance_reasons?: string[];
+  relevance_rank?: number;
   study_design?: string;
   design_rank?: number;
   design_tier?: string;
@@ -365,7 +368,8 @@ function StudyCard({ record }: { record: RecordItem }) {
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <div className="mb-3 flex flex-wrap gap-2 text-xs font-semibold">
-        <span className="rounded-full bg-teal-50 px-3 py-1 text-teal-900">{record.study_design || "Design unclear"}</span>
+        <span className="rounded-full bg-teal-50 px-3 py-1 text-teal-900">{record.relevance_tier || "Relevance unclassified"}</span>
+        <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-900">{record.study_design || "Design unclear"}</span>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">{record.year || "Year unavailable"}</span>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">{record.result_signal || "Result unclear"}</span>
       </div>
@@ -373,6 +377,9 @@ function StudyCard({ record }: { record: RecordItem }) {
       <p className="mt-2 text-sm text-slate-500">
         {[record.journal, record.sources?.join(" + ") || record.source, record.sample_size_detected ? `n≈${record.sample_size_detected}` : ""].filter(Boolean).join(" · ")}
       </p>
+      {record.relevance_reasons && (
+        <p className="mt-2 text-xs text-slate-500">Relevance rationale: {record.relevance_reasons.join(" · ")}</p>
+      )}
 
       <div className="mt-5">
         <h4 className="text-sm font-semibold text-slate-800">Reported results</h4>
