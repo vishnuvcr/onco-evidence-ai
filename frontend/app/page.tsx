@@ -31,6 +31,9 @@ type RecordItem = {
   methodology_assessment?: string;
   appraisal_scope?: string;
   full_text_status?: string;
+  recommended_appraisal_tool?: string;
+  appraisal_tool_url?: string;
+  appraisal_tool_note?: string;
 };
 
 type SearchResult = {
@@ -391,10 +394,20 @@ function StudyCard({ record }: { record: RecordItem }) {
       </div>
 
       <div className="mt-4 rounded-xl bg-slate-50 p-4">
-        <h4 className="text-sm font-semibold text-slate-800">Study-design classification</h4>
+        <h4 className="text-sm font-semibold text-slate-800">Provisional appraisal framework</h4>
+        <p className="mt-1 text-sm font-semibold text-slate-800">
+          {record.recommended_appraisal_tool || "Manual design confirmation required"}
+        </p>
         <p className="mt-1 text-sm leading-relaxed text-slate-600">
-          {record.study_design || "Not classified"} — provisional classification from available metadata;
-          the Methods section must be checked before selecting a formal appraisal instrument.
+          {record.appraisal_tool_note || "Confirm the study design from the complete Methods section before using an appraisal tool."}
+        </p>
+        {record.appraisal_tool_url && (
+          <a className="mt-2 inline-block text-sm font-semibold text-teal-800 underline" href={record.appraisal_tool_url} target="_blank" rel="noreferrer">
+            Open official appraisal resource
+          </a>
+        )}
+        <p className="mt-2 text-xs text-slate-500">
+          This is a tool recommendation only. No risk-of-bias questionnaire has been completed or scored.
         </p>
       </div>
 
