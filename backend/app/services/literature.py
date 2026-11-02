@@ -520,9 +520,9 @@ def recommend_appraisal_tool(record: dict[str, Any], design: str) -> dict[str, s
                 "appraisal_tool_note": "Potentially appropriate for follow-up cohort studies evaluating interventions; V2 remains a draft. Otherwise select a JBI cohort or exposure-specific tool.",
             }
         return {
-            "recommended_appraisal_tool": "JBI Cohort Checklist",
-            "appraisal_tool_url": "https://jbi.global/critical-appraisal-tools",
-            "appraisal_tool_note": "Provisional choice for an observational cohort not evaluating an intervention. If the review question concerns an exposure, consider ROBINS-E instead.",
+            "recommended_appraisal_tool": "ROBINS-E (exposure cohort)",
+            "appraisal_tool_url": "https://www.riskofbias.info/welcome/robins-e-tool",
+            "appraisal_tool_note": "For non-randomized follow-up cohort studies estimating the causal effect of an exposure. If this is not an exposure-effect question, use the appropriate JBI cohort checklist.",
         }
     if design in ("Case-control study", "Cross-sectional study", "Case series / case report"):
         return {
@@ -538,9 +538,9 @@ def recommend_appraisal_tool(record: dict[str, Any], design: str) -> dict[str, s
                 "appraisal_tool_note": "For clinical practice guidelines; verify that the document is a guideline rather than a narrative review.",
             }
         return {
-            "recommended_appraisal_tool": "ROBIS / review-type-specific appraisal",
-            "appraisal_tool_url": "https://www.bristol.ac.uk/population-health-sciences/projects/robis/",
-            "appraisal_tool_note": "Confirm the review type and use an instrument designed for that form of evidence synthesis.",
+            "recommended_appraisal_tool": "SANRA",
+            "appraisal_tool_url": "https://doi.org/10.1186/s41073-019-0064-8",
+            "appraisal_tool_note": "For narrative reviews. SANRA assesses review quality, not formal risk of bias, and should not be confused with systematic-review appraisal.",
         }
     return {
         "recommended_appraisal_tool": "Manual design confirmation required",
