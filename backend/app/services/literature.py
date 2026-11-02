@@ -478,123 +478,41 @@ def _relevance_assessment(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _result_signal(text: str) -> tuple[str, str]:
-    lower = text.lower()
-    favorable = bool(re.search(
-        r"(significantly|significant) (improved|higher|better)|"
-        r"improved (overall survival|progression.free survival|disease.free survival|local control|response|quality of life)|"
-        r"reduced (mortality|recurrence|toxicity|xerostomia|risk)|"
-        r"superior (overall survival|local control|response|outcome)", lower,
-    ))
-    null = bool(re.search(
-        r"no significant difference|not significantly (different|improved|associated)|"
-        r"no improvement|similar (overall survival|outcomes|rates)|"
-        r"did not improve|failed to improve|equivalent outcomes", lower,
-    ))
-    unfavorable = bool(re.search(
-        r"worse (overall survival|outcomes|local control)|inferior (overall survival|local control|outcomes)|"
-        r"higher (grade\s*[3-5]|severe toxicity|treatment.related mortality)", lower,
-    ))
-    if sum((favorable, null, unfavorable)) > 1:
-        return "Mixed / conflicting signal", "The abstract contains phrases pointing in more than one direction."
-    if favorable:
-        return "Favorable signal reported", "A favorable outcome phrase was detected in the abstract; verify the endpoint and comparator."
-    if null:
-        return "Null / no-benefit signal reported", "A no-difference or no-benefit phrase was detected in the abstract."
-    if unfavorable:
-        return "Unfavorable signal reported", "An unfavorable outcome phrase was detected in the abstract; verify the endpoint and context."
-    return "Unclear from abstract", "The abstract does not contain a sufficiently clear outcome-direction phrase for automated grouping."
-
-
 def appraise_abstract(record: dict[str, Any]) -> dict[str, Any]:
+    """Return screening metadata only; never infer outcome direction or study quality from abstract wording."""
     abstract = record.get("abstract") or ""
     text = f"{record.get('title', '')}. {abstract}"
     design = _study_design(record, text)
     rank = DESIGN_ORDER[design]
-    lower = text.lower()
-    strengths: list[str] = []
-    limitations: list[str] = []
-    signals: list[str] = []
-
-    checks = [
-        (r"randomi[sz]ed|random allocation", "Random allocation is mentioned in the abstract."),
-        (r"prospective|prospectively", "Prospective data collection is mentioned."),
-        (r"multicentre|multicenter|multi-centre|multi-center", "A multicenter design is mentioned."),
-        (r"blinded|double.blind|triple.blind", "Blinding is mentioned."),
-        (r"intention.to.treat|intention to treat", "Intention-to-treat analysis is mentioned."),
-        (r"multivariable|multivariate|adjusted analysis|propensity score", "Adjusted or multivariable analysis is mentioned."),
-        (r"external validation|independent validation|external cohort", "External/independent validation is mentioned."),
-        (r"registered|registration number|clinicaltrials.gov", "Study registration is mentioned."),
-    ]
-    for pattern, description in checks:
-        if re.search(pattern, lower):
-            strengths.append(description)
-            signals.append(description)
-    if re.search(r"retrospective", lower):
-        limitations.append("Retrospective design is mentioned; selection and information bias need full-text assessment.")
-    if re.search(r"single.center|single institution|single.institutional", lower):
-        limitations.append("Single-center/institution setting is mentioned; generalizability needs assessment.")
-    if re.search(r"small sample|limited sample|few patients|\b(n\s*[=<:]?\s*[0-4]?\d)\b", lower):
-        limitations.append("A small sample or small cohort may be a concern; verify the actual sample size and power.")
-    if re.search(r"short follow.up|limited follow.up|median follow.up.{0,30}(month|week)", lower):
-        limitations.append("Follow-up duration may be limited; assess whether it is adequate for the endpoint.")
-    if re.search(r"no control group|without a control|single.arm", lower):
-        limitations.append("No concurrent control/comparator is indicated.")
-    if re.search(r"limitations? (include|are|were|of this study)|limited by", lower):
-        limitations.append("The authors explicitly discuss limitations in the abstract.")
-
-    n_match = re.search(
-        r"\b(?:n\s*=\s*|among\s+)(\d{2,5})\s*(?:patients|participants|subjects|cases)?",
-        lower,
-    )
-    sample_size = int(n_match.group(1)) if n_match else None
-
-    summary_sentences = []
-    for _label, content in re.findall(
-        r"(?:^|\s)(RESULTS?|FINDINGS?|CONCLUSIONS?|CONCLUSION)\s*:\s*(.*?)(?=\s(?:METHODS?|BACKGROUND|OBJECTIVE|AIMS?|RESULTS?|FINDINGS?|CONCLUSIONS?|CONCLUSION)\s*:|$)",
-        abstract, flags=re.IGNORECASE,
-    ):
-        if content.strip():
-            summary_sentences.append(content.strip())
-    if not summary_sentences:
-        sentences = re.split(r"(?<=[.!?])\s+", abstract.strip())
-        summary_sentences = [
-            sentence.strip() for sentence in sentences
-            if re.search(r"result|found|observed|associated|survival|response|control|significant|conclud|demonstrat", sentence, re.I)
-        ][:2]
-    results_summary = " ".join(summary_sentences)[:900] if summary_sentences else (
-        "No extractable results statement was identified in the available abstract."
-    )
-
-    signal, signal_note = _result_signal(results_summary)
-    if not strengths:
-        strengths = ["No specific methodological strength signal was detected in the abstract."]
-    if not limitations:
-        limitations = ["No explicit limitation signal was detected in the abstract; this does not mean the study has no limitations."]
-
-    if rank <= 2:
-        design_tier = "Higher-level design signal"
-    elif rank <= 5:
-        design_tier = "Comparative/interventional or cohort design signal"
-    elif rank <= 8:
-        design_tier = "Observational/model-based design signal"
-    elif rank <= 10:
-        design_tier = "Descriptive or secondary evidence signal"
-    else:
-        design_tier = "Design unclear from abstract"
 
     return {
-        "study_design": design, "design_rank": rank, "design_tier": design_tier,
-        "result_signal": signal, "result_signal_note": signal_note,
-        "results_summary": results_summary, "sample_size_detected": sample_size,
-        "strengths": strengths, "limitations": limitations,
-        "methodology_signals": signals,
-        "methodology_assessment": (
-            "Preliminary abstract-level signals only. Correctness, risk of bias, "
-            "allocation concealment, missing data, protocol deviations, outcome "
-            "switching and statistical assumptions require full-text appraisal."
+        "study_design": design,
+        "design_rank": rank,
+        "design_tier": "Provisional study-design classification — verify using the full Methods section.",
+        "result_signal": "Not assessed — full text required",
+        "result_signal_note": (
+            "No favorable, unfavorable, or neutral conclusion is assigned from keyword "
+            "or phrase matching. Outcomes must be extracted and compared with the "
+            "prespecified comparator, endpoint, time point, effect estimate, and confidence interval."
         ),
-        "appraisal_scope": "Abstract-level automated screen; not a validated risk-of-bias tool.",
+        "results_summary": (
+            "Full-text results extraction has not yet been completed. The abstract is "
+            "retained for discovery and screening only."
+        ),
+        "sample_size_detected": None,
+        "strengths": [],
+        "limitations": [],
+        "methodology_signals": [],
+        "methodology_assessment": (
+            "Not yet appraised. A full-text review of Methods, Results, tables, figures, "
+            "supplements, protocol/registration, and statistical methods is required. "
+            "A design-specific validated risk-of-bias tool must then be applied."
+        ),
+        "appraisal_scope": "Discovery metadata only — no critical appraisal performed.",
+        "full_text_status": (
+            "Full text not yet retrieved or analysed. Where a PMC identifier is present, "
+            "the article can be checked for reusable full text under its own licence."
+        ),
     }
 
 
