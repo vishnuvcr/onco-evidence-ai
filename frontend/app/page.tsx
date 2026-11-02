@@ -62,11 +62,7 @@ const PAGE_SIZE = 50;
 
 const FILTERS = [
   { value: "all", label: "All papers" },
-  { value: "Favorable signal reported", label: "Favorable result signal" },
-  { value: "Null / no-benefit signal reported", label: "Null / no-benefit signal" },
-  { value: "Unfavorable signal reported", label: "Unfavorable result signal" },
-  { value: "Mixed / conflicting signal", label: "Mixed / conflicting" },
-  { value: "Unclear from abstract", label: "Unclear from abstract" },
+  { value: "Not assessed — full text required", label: "Awaiting full-text appraisal" },
 ];
 
 export default function Home() {
