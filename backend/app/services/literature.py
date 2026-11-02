@@ -287,9 +287,12 @@ async def search_europe_pmc(
     records: list[dict[str, Any]] = []
     for item in items:
         pmid, doi = item.get("pmid", ""), item.get("doi", "")
-        pub_types = item.get("pubTypeList", {}).get("pubType", [])
+        pub_type_data = item.get("pubTypeList") or {}
+        pub_types = pub_type_data.get("pubType", []) if isinstance(pub_type_data, dict) else pub_type_data
         if isinstance(pub_types, str):
             pub_types = [pub_types]
+        if not isinstance(pub_types, list):
+            pub_types = []
         author_string = item.get("authorString", "")
         records.append({
             "title": item.get("title", ""),
@@ -451,7 +454,7 @@ def appraise_abstract(record: dict[str, Any]) -> dict[str, Any]:
         "No extractable results statement was identified in the available abstract."
     )
 
-    signal, signal_note = _result_signal(f"{record.get('title', '')}. {results_summary} {abstract[:1500]}")
+    signal, signal_note = _result_signal(results_summary)
     if not strengths:
         strengths = ["No specific methodological strength signal was detected in the abstract."]
     if not limitations:
