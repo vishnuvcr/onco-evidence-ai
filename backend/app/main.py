@@ -4,19 +4,23 @@ from app.api.search import router as search_router
 
 app = FastAPI(
     title="OncoEvidence AI API",
-    version="0.1.0",
+    version="0.2.0",
     description="Literature discovery prototype; not for autonomous clinical decisions.",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://vishnuvcr.github.io",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 app.include_router(search_router, prefix="/api")
+
 
 @app.get("/health")
 async def health():
