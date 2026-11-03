@@ -2,6 +2,11 @@
 
 Clinical literature discovery and evidence-appraisal workspace.
 
+## Website-only workflow
+Users can search, retrieve eligible full text, run full-text outcome-level appraisal, and review risk-of-bias domains entirely inside the website. No Colab, notebook, file export/import, or personal API key is required.
+
+The latest search and completed appraisals are saved in the current browser using IndexedDB. If the page is refreshed or reopened in the same browser, the user can resume the remaining papers. The page must remain open while active processing is running; closing it pauses the queue. Browser storage is local to that browser/device and is not cloud-synchronized.
+
 ## Current workflow
 - Search PubMed and Europe PMC, deduplicating by PMID/DOI/title.
 - Resolve eligible papers to Europe PMC / PMC full text.
@@ -17,7 +22,7 @@ The full-text appraisal endpoint uses the Groq OpenAI-compatible API. Configure 
 - `GROQ_API_KEY`: required secret from your Groq Console.
 - `GROQ_MODEL`: optional; defaults to `openai/gpt-oss-120b`.
 
-Never commit a real API key. Add it through your hosting provider's secret/environment-variable settings. Free inference accounts have model-specific quotas; the UI processes one paper per request and reports rate-limit failures.
+Never commit a real API key. Add it through your hosting provider's secret/environment-variable settings. The key is used only by the backend; visitors do not enter it. Free inference accounts have model-specific quotas; the UI processes one paper per request and reports rate-limit failures.
 
 ## Architecture
 - `frontend/`: Next.js + TypeScript, exported to GitHub Pages.
