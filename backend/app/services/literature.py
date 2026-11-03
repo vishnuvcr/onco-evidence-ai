@@ -200,11 +200,11 @@ def build_search_queries(question: str) -> dict[str, str]:
         ]
         strategy_parts.append("field-restricted keyword fallback")
         required_concept_groups = [{"label": "search terms", "terms": terms}]
-
-    required_concept_groups = [
-        {"label": item.get("triggers", ["topic"])[0], "terms": list(item.get("match_terms") or item["triggers"])}
-        for item in matched
-    ]
+    else:
+        required_concept_groups = [
+            {"label": item.get("triggers", ["topic"])[0], "terms": list(item.get("match_terms") or item["triggers"])}
+            for item in matched
+        ]
     return {
         "pubmed": " AND ".join(groups_pubmed),
         "europe_pmc": " AND ".join(groups_epmc),
