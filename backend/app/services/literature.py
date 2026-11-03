@@ -158,7 +158,7 @@ def build_search_queries(question: str) -> dict[str, str]:
         (concept for concept in CONCEPTS if "radiotherapy" in concept.get("triggers", ())),
         None,
     )
-    if re.search(r"\\brt\\b", normalised) and rt_concept and rt_concept not in matched:
+    if re.search(r"\brt\b", normalised) and rt_concept and rt_concept not in matched:
         matched.append(rt_concept)
 
     groups_pubmed = [f"({item['pubmed']})" for item in matched]
