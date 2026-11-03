@@ -31,6 +31,32 @@ CONCEPTS = [
         ),
     },
     {
+        "triggers": (
+            "radiotherapy", "radiation therapy", "radiation oncology",
+            "radiation treatment", "chemoradiotherapy", "chemoradiation",
+            "irradiation", "image guided radiotherapy", "intensity modulated radiotherapy",
+        ),
+        "pubmed": (
+            '"radiation oncology"[Title/Abstract] OR "radiotherapy"[Title/Abstract] OR '
+            '"radiation therapy"[Title/Abstract] OR "radiation treatment"[Title/Abstract] OR '
+            '"Radiotherapy"[MeSH Terms] OR "image-guided radiotherapy"[Title/Abstract] OR '
+            '"intensity-modulated radiotherapy"[Title/Abstract] OR '
+            '"intensity modulated radiation therapy"[Title/Abstract] OR '
+            'IMRT[Title/Abstract] OR VMAT[Title/Abstract] OR SBRT[Title/Abstract] OR '
+            'SABR[Title/Abstract] OR SRS[Title/Abstract] OR radiosurgery[Title/Abstract] OR '
+            'brachytherapy[Title/Abstract] OR "proton therapy"[Title/Abstract] OR '
+            '"stereotactic radiotherapy"[Title/Abstract] OR chemoradiotherapy[Title/Abstract] OR '
+            'chemoradiation[Title/Abstract]'
+        ),
+        "europe_pmc": (
+            '"radiation oncology" OR radiotherapy OR "radiation therapy" OR '
+            '"radiation treatment" OR "image-guided radiotherapy" OR '
+            '"intensity-modulated radiotherapy" OR "intensity modulated radiation therapy" OR '
+            'IMRT OR VMAT OR SBRT OR SABR OR SRS OR radiosurgery OR brachytherapy OR '
+            '"proton therapy" OR "stereotactic radiotherapy" OR chemoradiotherapy OR chemoradiation'
+        ),
+    },
+    {
         "triggers": ("salivary gland", "salivary function", "salivary flow", "xerostomia", "parotid"),
         "pubmed": (
             '"salivary gland"[Title/Abstract] OR "salivary glands"[MeSH Terms] OR '
@@ -132,59 +158,20 @@ def build_search_queries(question: str) -> dict[str, str]:
     if matched:
         strategy_parts.append(f"{len(matched)} mapped topic concept group(s)")
 
-    # The site is oncology-focused. When radiomics is asked in the context of
-    # radiation oncology/radiotherapy, require both the radiomics concept and
-    # a radiotherapy-domain concept. This prevents a generic radiomics-only
-    # query from returning unrelated diagnostic imaging papers.
+    # A radiotherapy concept is now a first-class mapped concept. If the
+    # question names radiotherapy, it is AND'ed with the other required topic
+    # groups rather than being used only for radiomics searches.
     asks_radiomics = any(_normalise(x) in normalised for x in ("radiomics", "radiomic", "radiogenomics"))
     asks_radiotherapy_context = any(
         _normalise(x) in normalised
         for x in (
             "radiation oncology", "radiotherapy", "radiation therapy",
-            "radiation treatment", "radiation therapy oncology",
+            "radiation treatment", "chemoradiotherapy", "chemoradiation",
+            "irradiation", "image guided radiotherapy",
         )
     )
-
     if asks_radiomics and asks_radiotherapy_context:
-        rt_pubmed = (
-            '"radiation oncology"[Title/Abstract] OR '
-            '"radiotherapy"[Title/Abstract] OR '
-            '"radiation therapy"[Title/Abstract] OR '
-            '"radiation treatment"[Title/Abstract] OR '
-            '"Radiotherapy"[MeSH Terms] OR '
-            '"image-guided radiotherapy"[Title/Abstract] OR '
-            '"intensity-modulated radiotherapy"[Title/Abstract] OR '
-            '"intensity modulated radiation therapy"[Title/Abstract] OR '
-            'IMRT[Title/Abstract] OR VMAT[Title/Abstract] OR '
-            'SBRT[Title/Abstract] OR SABR[Title/Abstract] OR '
-            'SRS[Title/Abstract] OR radiosurgery[Title/Abstract] OR '
-            'brachytherapy[Title/Abstract] OR '
-            '"proton therapy"[Title/Abstract] OR '
-            '"stereotactic radiotherapy"[Title/Abstract] OR '
-            'chemoradiotherapy[Title/Abstract]'
-        )
-        rt_epmc = (
-            'TITLE:"radiation oncology" OR ABSTRACT:"radiation oncology" OR '
-            'TITLE:radiotherapy OR ABSTRACT:radiotherapy OR '
-            'TITLE:"radiation therapy" OR ABSTRACT:"radiation therapy" OR '
-            'TITLE:"radiation treatment" OR ABSTRACT:"radiation treatment" OR '
-            'TITLE:"image-guided radiotherapy" OR ABSTRACT:"image-guided radiotherapy" OR '
-            'TITLE:"intensity-modulated radiotherapy" OR ABSTRACT:"intensity-modulated radiotherapy" OR '
-            'TITLE:IMRT OR ABSTRACT:IMRT OR TITLE:VMAT OR ABSTRACT:VMAT OR '
-            'TITLE:SBRT OR ABSTRACT:SBRT OR TITLE:SABR OR ABSTRACT:SABR OR '
-            'TITLE:SRS OR ABSTRACT:SRS OR TITLE:radiosurgery OR ABSTRACT:radiosurgery OR '
-            'TITLE:brachytherapy OR ABSTRACT:brachytherapy OR '
-            'TITLE:"proton therapy" OR ABSTRACT:"proton therapy" OR '
-            'TITLE:"stereotactic radiotherapy" OR ABSTRACT:"stereotactic radiotherapy" OR '
-            'TITLE:chemoradiotherapy OR ABSTRACT:chemoradiotherapy'
-        )
-        groups_pubmed.append(f"({rt_pubmed})")
-        groups_epmc.append(f"({rt_epmc})")
         strategy_parts.append("radiomics AND radiation-oncology context")
-    elif matched:
-        # Keep mapped concepts together using AND; synonyms remain OR'ed
-        # within each concept group.
-        pass
 
     if not groups_pubmed:
         terms = [
@@ -203,9 +190,14 @@ def build_search_queries(question: str) -> dict[str, str]:
         ]
         strategy_parts.append("field-restricted keyword fallback")
 
+    required_concept_groups = [
+        {"label": item.get("triggers", ["topic"])[0], "terms": list(item.get("match_terms") or item["triggers"])}
+        for item in matched
+    ]
     return {
         "pubmed": " AND ".join(groups_pubmed),
         "europe_pmc": " AND ".join(groups_epmc),
+        "required_concept_groups": required_concept_groups,
         "strategy": (
             "Focused discovery query: " + "; ".join(strategy_parts) +
             ". Synonyms are OR'ed within concepts and distinct concepts are AND'ed. "
@@ -450,6 +442,17 @@ RADIOTHERAPY_MATCH_TERMS = (
 )
 
 
+def _missing_required_concepts(record: dict[str, Any], groups: list[dict[str, Any]]) -> list[str]:
+    """Return explicit query concepts absent from both title and abstract metadata."""
+    text = _normalise(f"{record.get('title', '')} {record.get('abstract', '')}")
+    missing: list[str] = []
+    for group in groups:
+        terms = [_normalise(str(term)) for term in group.get("terms", []) if term]
+        if terms and not any(term in text for term in terms):
+            missing.append(str(group.get("label") or "required topic"))
+    return missing
+
+
 def _relevance_assessment(record: dict[str, Any]) -> dict[str, Any]:
     title = _normalise(record.get("title", ""))
     abstract = _normalise(record.get("abstract", ""))
@@ -620,11 +623,28 @@ async def search_all(question: str, limit: int) -> dict[str, Any]:
     else:
         epmc_records, epmc_total, epmc_route = epmc_result
 
-    records = deduplicate(pubmed_records + epmc_records)
-    for record in records:
+    deduplicated_records = deduplicate(pubmed_records + epmc_records)
+    # Apply a query-specific precision screen before the evidence timeline and
+    # appraisal queue are constructed. Search-engine matches alone are not
+    # sufficient when a required clinical context (e.g. radiotherapy) is absent.
+    records: list[dict[str, Any]] = []
+    excluded_records: list[dict[str, Any]] = []
+    required_groups = queries.get("required_concept_groups", [])
+    for record in deduplicated_records:
+        missing_groups = _missing_required_concepts(record, required_groups)
+        if missing_groups:
+            excluded_records.append({
+                **record,
+                "exclusion_reason": (
+                    "Missing required search concept(s) in title/abstract: "
+                    + ", ".join(missing_groups)
+                ),
+            })
+            continue
         record.update(_relevance_assessment(record))
         record.update(appraise_abstract(record))
         record.update(recommend_appraisal_tool(record, record.get("study_design", "Unclear from abstract")))
+        records.append(record)
 
     signal_order = {
         "Favorable signal reported": 0,
@@ -664,6 +684,8 @@ async def search_all(question: str, limit: int) -> dict[str, Any]:
             "europe_pmc_retrieved": len(epmc_records),
             "europe_pmc_total_matches": epmc_total,
             "unique_records": len(records),
+            "unique_records_before_relevance_filter": len(deduplicated_records),
+            "excluded_irrelevant": len(excluded_records),
         },
         "source_status": {
             "PubMed": "error" if any(e["source"] == "PubMed" for e in errors) else "ok",
@@ -677,6 +699,7 @@ async def search_all(question: str, limit: int) -> dict[str, Any]:
         },
         "source_errors": errors,
         "records": records,
+        "excluded_records": excluded_records,
         "interpretation": (
             "Literature discovery with preliminary automated abstract-level grouping. "
             "Result-direction labels are phrase-based signals, not independent verification "
