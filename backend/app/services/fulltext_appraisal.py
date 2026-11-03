@@ -88,18 +88,42 @@ def domains_for(tool: str) -> list[str]:
 
 
 async def resolve_pmc(client: httpx.AsyncClient, record: dict[str, Any]) -> dict[str, Any] | None:
-    if record.get("pmcid"):
-        query = "EXT_ID:" + tidy(str(record["pmcid"]))
-    elif record.get("pmid"):
-        query = "EXT_ID:" + tidy(str(record["pmid"]))
-    elif record.get("doi"):
-        query = 'DOI:"' + tidy(str(record["doi"])) + '"'
-    else:
-        return None
-    response = await client.get(EPMC + "/search", params={"query": query, "format": "json", "resultType": "core", "pageSize": 1})
-    response.raise_for_status()
-    rows = response.json().get("resultList", {}).get("result", [])
-    return rows[0] if rows else None
+    """Resolve exact publication identifiers using Europe PMC's field-specific query syntax.
+
+    PMCID must use PMCID:, while PMID can be looked up with EXT_ID: and DOI with DOI:.
+    Treating a PMCID as EXT_ID can return no match even when the record has a PMC link.
+    """
+    pmcid = tidy(str(record.get("pmcid") or "")).upper()
+    pmid = tidy(str(record.get("pmid") or ""))
+    doi = tidy(str(record.get("doi") or ""))
+
+    queries: list[tuple[str, str]] = []
+    if pmcid:
+        normalized_pmcid = pmcid if pmcid.startswith("PMC") else "PMC" + pmcid
+        queries.append(("PMCID:" + normalized_pmcid, "pmcid"))
+    if pmid:
+        queries.append(("EXT_ID:" + pmid, "pmid"))
+    if doi:
+        queries.append(('DOI:"' + doi.replace('"', '') + '"', "doi"))
+
+    for query, identifier_type in queries:
+        response = await client.get(
+            EPMC + "/search",
+            params={"query": query, "format": "json", "resultType": "core", "pageSize": 5},
+        )
+        response.raise_for_status()
+        rows = response.json().get("resultList", {}).get("result", [])
+        for row in rows:
+            row_pmcid = tidy(str(row.get("pmcid") or "")).upper()
+            row_pmid = tidy(str(row.get("pmid") or ""))
+            row_doi = tidy(str(row.get("doi") or "")).lower()
+            if identifier_type == "pmcid" and row_pmcid == normalized_pmcid:
+                return row
+            if identifier_type == "pmid" and row_pmid == pmid:
+                return row
+            if identifier_type == "doi" and row_doi == doi.lower():
+                return row
+    return None
 
 
 async def call_groq(client: httpx.AsyncClient, record: dict[str, Any], text: dict[str, str], tool: str, domains: list[str]) -> dict[str, Any]:
