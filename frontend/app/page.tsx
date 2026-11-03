@@ -192,8 +192,9 @@ export default function Home() {
       if (!Array.isArray(payload.records)) throw new Error("This file does not contain a records[] array.");
       const imported = new Map<string, RecordItem>();
       for (const record of payload.records) {
-        const key = record.pmcid || record.pmid || record.doi || record.title;
-        if (key) imported.set(String(key).toLowerCase(), record);
+        [record.pmcid, record.pmid, record.doi, record.title]
+          .filter(Boolean)
+          .forEach((key) => imported.set(String(key).toLowerCase(), record));
       }
       let matched = 0;
       const records = result.records.map((current) => {
