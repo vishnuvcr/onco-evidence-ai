@@ -450,8 +450,8 @@ export default function Home() {
       )}
 
       <footer className="mt-14 border-t border-slate-200 pt-5 text-xs leading-relaxed text-slate-500">
-        Research discovery and preliminary abstract screening only. This tool does not establish clinical recommendations,
-        formal risk of bias, or certainty of evidence. Verify each paper and its full text before clinical or academic use.
+        Research discovery with AI-assisted full-text extraction. Verify the extracted source passages and complete the relevant
+        official risk-of-bias instrument with a human reviewer. This tool does not establish clinical recommendations or GRADE certainty.
       </footer>
     </main>
   );
@@ -530,7 +530,7 @@ function FindingLabel({ value }: { value: string }) {
     unclear: "bg-slate-100 text-slate-700",
     not_reported: "bg-slate-100 text-slate-600",
   };
-  return <span className={\`rounded-full px-2.5 py-1 text-xs font-semibold \${styles[value] || styles.unclear}\`}>{labels[value] || value}</span>;
+  return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${styles[value] || styles.unclear}`}>{labels[value] || value}</span>;
 }
 
 function StudyCard({ record }: { record: RecordItem }) {
@@ -568,7 +568,7 @@ function StudyCard({ record }: { record: RecordItem }) {
             <p className="mt-1 text-xs text-slate-500">Findings are classified per endpoint, not as a single verdict for the paper.</p>
             <div className="mt-3 space-y-3">
               {(appraisal.outcomes || []).map((outcome, index) => (
-                <div key={\`\${outcome.outcome}-\${index}\`} className="rounded-xl border border-slate-200 p-4">
+                <div key={`${outcome.outcome}-${index}`} className="rounded-xl border border-slate-200 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h5 className="text-sm font-semibold text-slate-900">{outcome.outcome}</h5>
                     <FindingLabel value={outcome.outcome_group} />
@@ -587,7 +587,7 @@ function StudyCard({ record }: { record: RecordItem }) {
                   </div>
                   {(outcome.evidence_quotes || []).map((quote, quoteIndex) => (
                     <blockquote key={quoteIndex} className="mt-3 border-l-2 border-teal-300 pl-3 text-xs leading-relaxed text-slate-600">
-                      “{quote.excerpt}” <span className="font-semibold">— {quote.section}{quote.location ? \`, \${quote.location}\` : ""}</span>
+                      “{quote.excerpt}” <span className="font-semibold">— {quote.section}{quote.location ? `, ${quote.location}` : ""}</span>
                     </blockquote>
                   ))}
                 </div>
@@ -611,7 +611,7 @@ function StudyCard({ record }: { record: RecordItem }) {
             </div>
             <div className="mt-3 space-y-3">
               {(appraisal.risk_of_bias?.domains || []).map((domain, index) => (
-                <div key={\`\${domain.domain}-\${index}\`} className="border-t border-slate-200 pt-3">
+                <div key={`${domain.domain}-${index}`} className="border-t border-slate-200 pt-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-slate-800">{domain.domain}</p>
                     <span className="text-xs font-bold uppercase tracking-wide text-slate-600">{domain.judgement.replaceAll("_", " ")}</span>
@@ -639,7 +639,7 @@ function StudyCard({ record }: { record: RecordItem }) {
           <p className="text-xs text-slate-500">
             Funding / conflicts: {appraisal.funding_and_conflicts || "Not identified in extracted text"} ·
             Verified source excerpts: {appraisal.evidence_integrity?.verified_excerpt_count ?? 0}
-            {appraisal.license ? \` · Licence: \${appraisal.license}\` : ""}
+            {appraisal.license ? ` · Licence: ${appraisal.license}` : ""}
           </p>
           {appraisal.appraisal_warnings && appraisal.appraisal_warnings.length > 0 && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
@@ -661,8 +661,8 @@ function StudyCard({ record }: { record: RecordItem }) {
 
       <div className="mt-4 flex flex-wrap gap-4 text-sm">
         {record.url && <a className="font-semibold text-teal-800 underline" href={record.url} target="_blank" rel="noreferrer">Open publication</a>}
-        {record.doi && <a className="text-slate-600 underline" href={\`https://doi.org/\${record.doi}\`} target="_blank" rel="noreferrer">DOI: {record.doi}</a>}
-        {(record.pmcid || result?.pmcid) && <a className="text-slate-600 underline" href={\`https://pmc.ncbi.nlm.nih.gov/articles/\${result?.pmcid || record.pmcid}/\`} target="_blank" rel="noreferrer">Open PMC full text</a>}
+        {record.doi && <a className="text-slate-600 underline" href={`https://doi.org/${record.doi}`} target="_blank" rel="noreferrer">DOI: {record.doi}</a>}
+        {(record.pmcid || result?.pmcid) && <a className="text-slate-600 underline" href={`https://pmc.ncbi.nlm.nih.gov/articles/${result?.pmcid || record.pmcid}/`} target="_blank" rel="noreferrer">Open PMC full text</a>}
       </div>
     </article>
   );
