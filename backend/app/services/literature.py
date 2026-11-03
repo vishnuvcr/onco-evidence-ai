@@ -35,6 +35,10 @@ CONCEPTS = [
             "radiotherapy", "radiation therapy", "radiation oncology",
             "radiation treatment", "chemoradiotherapy", "chemoradiation",
             "irradiation", "image guided radiotherapy", "intensity modulated radiotherapy",
+            "imrt", "vmat", "sbrt", "sabr", "srs", "radiosurgery",
+            "brachytherapy", "proton therapy", "stereotactic radiotherapy",
+            "external beam radiotherapy", "external beam radiation therapy",
+            "radiation induced", "radiation-induced", "post radiation", "post-radiation",
         ),
         "pubmed": (
             '"radiation oncology"[Title/Abstract] OR "radiotherapy"[Title/Abstract] OR '
@@ -150,6 +154,12 @@ def build_search_queries(question: str) -> dict[str, str]:
         concept for concept in CONCEPTS
         if any(_normalise(trigger) in normalised for trigger in concept["triggers"])
     ]
+    rt_concept = next(
+        (concept for concept in CONCEPTS if "radiotherapy" in concept.get("triggers", ())),
+        None,
+    )
+    if re.search(r"\\brt\\b", normalised) and rt_concept and rt_concept not in matched:
+        matched.append(rt_concept)
 
     groups_pubmed = [f"({item['pubmed']})" for item in matched]
     groups_epmc = [f"({item['europe_pmc']})" for item in matched]
@@ -189,6 +199,7 @@ def build_search_queries(question: str) -> dict[str, str]:
             ) + ")"
         ]
         strategy_parts.append("field-restricted keyword fallback")
+        required_concept_groups = [{"label": "search terms", "terms": terms}]
 
     required_concept_groups = [
         {"label": item.get("triggers", ["topic"])[0], "terms": list(item.get("match_terms") or item["triggers"])}
@@ -453,38 +464,48 @@ def _missing_required_concepts(record: dict[str, Any], groups: list[dict[str, An
     return missing
 
 
-def _relevance_assessment(record: dict[str, Any]) -> dict[str, Any]:
+def _relevance_assessment(
+    record: dict[str, Any], required_groups: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Score title/abstract alignment against the actual clinical question."""
     title = _normalise(record.get("title", ""))
     abstract = _normalise(record.get("abstract", ""))
-    full_text = f"{title} {abstract}"
+    combined = f"{title} {abstract}"
+    total = len(required_groups)
 
-    has_radiomics_title = any(term in title for term in RADIOMICS_MATCH_TERMS)
-    has_rt_title = any(term in title for term in RADIOTHERAPY_MATCH_TERMS)
-    has_radiomics = any(term in full_text for term in RADIOMICS_MATCH_TERMS)
-    has_rt = any(term in full_text for term in RADIOTHERAPY_MATCH_TERMS)
+    title_matches = 0
+    abstract_matches = 0
+    missing: list[str] = []
+    for group in required_groups:
+        terms = [_normalise(str(term)) for term in group.get("terms", []) if term]
+        title_hit = any(term in title for term in terms)
+        combined_hit = any(term in combined for term in terms)
+        title_matches += int(title_hit)
+        abstract_matches += int(combined_hit)
+        if not combined_hit:
+            missing.append(str(group.get("label") or "required topic"))
 
-    if has_radiomics_title and has_rt_title:
-        tier, rank = "Very high: both concepts in title", 1
-        reasons = ["Radiomics concept in title", "Radiotherapy context in title"]
-    elif has_radiomics and has_rt and (has_radiomics_title or has_rt_title):
+    if total and title_matches == total:
+        tier, rank = "Very high: all concepts in title", 1
+        reasons = ["All required topic concepts appear in the title"]
+    elif total and abstract_matches == total and title_matches > 0:
         tier, rank = "High: title + abstract context", 2
-        reasons = ["Both concepts detected; at least one appears in the title"]
-    elif has_radiomics and has_rt:
-        tier, rank = "Moderate: both concepts in abstract", 3
-        reasons = ["Both concepts detected in title/abstract metadata"]
-    elif has_radiomics or has_rt:
-        tier, rank = "Low: one concept detected", 4
-        reasons = ["Only one of the two required concepts was detected in the returned metadata"]
+        reasons = ["All required concepts are present; at least one appears in the title"]
+    elif total and abstract_matches == total:
+        tier, rank = "Moderate: all concepts in abstract", 3
+        reasons = ["All required concepts appear in title/abstract metadata"]
+    elif abstract_matches:
+        tier, rank = "Low: incomplete concept match", 4
+        reasons = ["Missing from title/abstract: " + ", ".join(missing)]
     else:
         tier, rank = "Unclear relevance", 5
-        reasons = ["Could not confirm both concepts from title/abstract text"]
+        reasons = ["The returned metadata does not confirm the requested topic"]
 
     return {
         "relevance_tier": tier,
         "relevance_rank": rank,
         "relevance_reasons": reasons,
     }
-
 
 def recommend_appraisal_tool(record: dict[str, Any], design: str) -> dict[str, str]:
     """Suggest a design-appropriate instrument; this is routing, not an appraisal."""
@@ -641,7 +662,7 @@ async def search_all(question: str, limit: int) -> dict[str, Any]:
                 ),
             })
             continue
-        record.update(_relevance_assessment(record))
+        record.update(_relevance_assessment(record, required_groups))
         record.update(appraise_abstract(record))
         record.update(recommend_appraisal_tool(record, record.get("study_design", "Unclear from abstract")))
         records.append(record)
