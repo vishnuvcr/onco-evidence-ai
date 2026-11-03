@@ -50,7 +50,7 @@ type SearchResult = {
   source_status?: Record<string, string>;
   appraisal_summary?: {
     by_study_design?: Record<string, number>;
-    by_reported_result_signal?: Record<string, number>;
+    by_search_relevance?: Record<string, number>;
     by_publication_year?: Record<string, number>;
   };
   records: RecordItem[];
@@ -211,14 +211,14 @@ export default function Home() {
             <p className="mt-1 text-sm text-slate-500">Automated grouping of the retrieved abstracts, not a formal certainty-of-evidence grade.</p>
             <div className="mt-5 grid gap-6 lg:grid-cols-2">
               <SummaryList title="By study design" values={result.appraisal_summary?.by_study_design || {}} />
-              <SummaryList title="By reported result signal" values={result.appraisal_summary?.by_reported_result_signal || {}} />
+              <SummaryList title="By search relevance" values={result.appraisal_summary?.by_search_relevance || {}} />
             </div>
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
-            <h2 className="text-xl font-bold">Results timeline</h2>
+            <h2 className="text-xl font-bold">Publication timeline</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Papers are arranged by first publication year, oldest to newest. Expand a year to inspect its findings.
+              Papers are arranged by first publication year, oldest to newest. Expand a year to inspect publication details and provisional study-design classification.
             </p>
             {timeline.length === 0 ? (
               <p className="mt-4 text-sm text-slate-500">No timeline can be built because no records were retrieved.</p>
@@ -235,11 +235,9 @@ export default function Home() {
                         <div key={paper.pmid || paper.doi || `${paper.title}-${index}`}>
                           <p className="text-sm font-semibold">{paper.title || "Title unavailable"}</p>
                           <p className="mt-1 text-xs text-slate-500">
-                            {paper.study_design || "Study design unclear"} · {paper.result_signal || "Result signal unclear"}
+                            {paper.study_design || "Study design unclear"} · {paper.relevance_tier || "Relevance not classified"}
                           </p>
-                          {paper.results_summary && (
-                            <p className="mt-1 text-sm leading-relaxed text-slate-600">{paper.results_summary}</p>
-                          )}
+
                           {paper.url && <a className="mt-1 inline-block text-xs font-semibold text-teal-800 underline" href={paper.url} target="_blank" rel="noreferrer">Open paper</a>}
                         </div>
                       ))}
