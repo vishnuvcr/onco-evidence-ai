@@ -457,7 +457,7 @@ RADIOTHERAPY_MATCH_TERMS = (
 def _contains_search_term(text: str, term: str) -> bool:
     # Very short terms such as RT must match as whole tokens, not substrings.
     if len(term) <= 2:
-        return bool(re.search(r"\b" + re.escape(term) + r"\\b", text))
+        return bool(re.search(r"\b" + re.escape(term) + r"\b", text))
     return term in text
 
 
