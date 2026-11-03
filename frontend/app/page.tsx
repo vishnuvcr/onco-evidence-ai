@@ -81,6 +81,7 @@ type RecordItem = {
   appraisal_tool_url?: string;
   appraisal_tool_note?: string;
   full_text_appraisal?: FullTextAppraisal;
+  exclusion_reason?: string;
 };
 
 type SearchResult = {
@@ -93,6 +94,8 @@ type SearchResult = {
     europe_pmc_retrieved: number;
     europe_pmc_total_matches?: number;
     unique_records: number;
+    unique_records_before_relevance_filter?: number;
+    excluded_irrelevant?: number;
   };
   source_status?: Record<string, string>;
   appraisal_summary?: {
@@ -101,6 +104,7 @@ type SearchResult = {
     by_publication_year?: Record<string, number>;
   };
   records: RecordItem[];
+  excluded_records?: RecordItem[];
   interpretation: string;
   source_errors: { source: string; error: string }[];
   search_strategy?: string;
@@ -303,14 +307,40 @@ export default function Home() {
 
       {result && (
         <section className="mt-8 space-y-8">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Metric label="PubMed retrieved" value={result.counts.pubmed_retrieved}
               detail={result.counts.pubmed_total_matches != null ? `${result.counts.pubmed_total_matches.toLocaleString()} matching records` : undefined} />
             <Metric label="Europe PMC retrieved" value={result.counts.europe_pmc_retrieved}
               detail={result.counts.europe_pmc_total_matches != null ? `${result.counts.europe_pmc_total_matches.toLocaleString()} matching records` : undefined} />
-            <Metric label="Unique papers" value={result.counts.unique_records} detail="After PMID / DOI / title deduplication" />
+            <Metric label="Eligible unique papers" value={result.counts.unique_records}
+              detail="After deduplication and required-concept screening" />
+            <Metric label="Excluded as irrelevant" value={result.counts.excluded_irrelevant || 0}
+              detail={`${(result.counts.unique_records_before_relevance_filter ?? result.counts.unique_records).toLocaleString()} unique candidates screened`} />
             <Metric label="Retrieval ceiling" value={result.requested_limit_per_source || 1000} detail="Per source for this search" />
           </div>
+
+          {(result.excluded_records?.length || 0) > 0 && (
+            <details className="rounded-2xl border border-amber-200 bg-white p-5 sm:p-6">
+              <summary className="cursor-pointer list-none text-base font-semibold text-slate-900">
+                {result.excluded_records!.length.toLocaleString()} records excluded during relevance screening
+              </summary>
+              <p className="mt-2 text-sm text-slate-600">
+                These records did not contain every required topic concept in their title or abstract. They are excluded from the evidence timeline, outcome segregation, and full-text appraisal queue, but retained here for transparency.
+              </p>
+              <div className="mt-4 max-h-96 space-y-3 overflow-y-auto">
+                {result.excluded_records!.map((paper, index) => (
+                  <div key={paper.pmid || paper.doi || `${paper.title}-${index}`} className="border-t border-slate-100 pt-3">
+                    <p className="text-sm font-semibold text-slate-900">{paper.title || "Title unavailable"}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {[paper.year, paper.journal, paper.pmid ? `PMID: ${paper.pmid}` : ""].filter(Boolean).join(" · ")}
+                    </p>
+                    <p className="mt-1 text-xs text-amber-800">{paper.exclusion_reason || "Required search concepts not confirmed in title/abstract."}</p>
+                    {paper.url && <a className="mt-1 inline-block text-xs font-semibold text-teal-800 underline" href={paper.url} target="_blank" rel="noreferrer">Open publication</a>}
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
 
           <section className="rounded-2xl border border-teal-200 bg-white p-5 sm:p-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -320,7 +350,7 @@ export default function Home() {
                   {appraisedCount} appraised · {processedCount - appraisedCount} separated by full-text access · {result.records.length - processedCount} remaining
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  Automatically checks every retrieved paper in sequence. Papers without reusable PMC full text are separated; if the free inference quota is reached, the queue pauses and can be resumed.
+                  Automatically checks every eligible paper in sequence. Records missing a required search concept are excluded before appraisal; papers without reusable PMC full text are separated. If the free inference quota is reached, the queue pauses and can be resumed.
                 </p>
               </div>
               <button
