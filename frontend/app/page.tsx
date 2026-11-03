@@ -457,7 +457,7 @@ export default function Home() {
             </div>
             <p className="mb-4 text-sm text-slate-600">
               Showing {visibleRecords.length.toLocaleString()} of {filteredRecords.length.toLocaleString()} papers in this view
-              ({result.records.length.toLocaleString()} retrieved in total).
+              ({result.records.length.toLocaleString()} eligible papers after relevance screening).
             </p>
             <div className="space-y-4">
               {visibleRecords.map((record, index) => (
