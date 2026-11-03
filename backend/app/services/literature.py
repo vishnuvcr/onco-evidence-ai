@@ -636,13 +636,13 @@ async def search_all(question: str, limit: int) -> dict[str, Any]:
     ))
 
     design_counts: dict[str, int] = {}
-    signal_counts: dict[str, int] = {}
+    relevance_counts: dict[str, int] = {}
     year_counts: dict[str, int] = {}
     for item in records:
         design = item.get("study_design", "Unclear from abstract")
-        signal = item.get("result_signal", "Unclear from abstract")
+        relevance = item.get("relevance_tier", "Unclear relevance")
         design_counts[design] = design_counts.get(design, 0) + 1
-        signal_counts[signal] = signal_counts.get(signal, 0) + 1
+        relevance_counts[relevance] = relevance_counts.get(relevance, 0) + 1
         year = str(item.get("year") or "Unknown")
         year_counts[year] = year_counts.get(year, 0) + 1
 
@@ -667,7 +667,7 @@ async def search_all(question: str, limit: int) -> dict[str, Any]:
         },
         "appraisal_summary": {
             "by_study_design": design_counts,
-            "by_reported_result_signal": signal_counts,
+            "by_search_relevance": relevance_counts,
             "by_publication_year": year_counts,
         },
         "source_errors": errors,
