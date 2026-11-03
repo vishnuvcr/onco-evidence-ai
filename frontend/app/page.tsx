@@ -2,6 +2,52 @@
 
 import { FormEvent, useMemo, useState } from "react";
 
+type OutcomeItem = {
+  outcome: string;
+  outcome_group: string;
+  endpoint?: string;
+  timepoint?: string;
+  population_n?: string;
+  events_or_summary?: string;
+  effect_measure?: string;
+  effect_estimate?: string;
+  confidence_interval?: string;
+  p_value?: string;
+  statistical_significance?: string;
+  clinical_interpretation?: string;
+  evidence_quotes?: { section: string; excerpt: string; location?: string }[];
+};
+
+type FullTextAppraisal = {
+  status: string;
+  reason?: string;
+  pmcid?: string;
+  appraisal?: {
+    study_design_verified?: string;
+    population?: string;
+    intervention?: string;
+    comparator?: string;
+    follow_up?: string;
+    outcomes?: OutcomeItem[];
+    outcome_groups?: string[];
+    main_findings?: string;
+    methods_assessment?: string;
+    limitations_reported?: string[];
+    funding_and_conflicts?: string;
+    risk_of_bias?: {
+      tool?: string;
+      overall_judgement?: string;
+      note?: string;
+      domains?: { domain: string; judgement: string; rationale?: string; evidence_quotes?: { section: string; excerpt: string }[] }[];
+    };
+    appraisal_warnings?: string[];
+    framework_url?: string;
+    framework_note?: string;
+    license?: string;
+    evidence_integrity?: { verified_excerpt_count?: number; full_text_characters_reviewed?: number };
+  };
+};
+
 type RecordItem = {
   title: string;
   abstract: string;
@@ -34,6 +80,7 @@ type RecordItem = {
   recommended_appraisal_tool?: string;
   appraisal_tool_url?: string;
   appraisal_tool_note?: string;
+  full_text_appraisal?: FullTextAppraisal;
 };
 
 type SearchResult = {
@@ -65,7 +112,13 @@ const PAGE_SIZE = 50;
 
 const FILTERS = [
   { value: "all", label: "All papers" },
-  { value: "Not assessed — full text required", label: "Awaiting full-text appraisal" },
+  { value: "benefit", label: "Outcome: benefit observed" },
+  { value: "no_clear_difference", label: "Outcome: no clear difference" },
+  { value: "harm", label: "Outcome: harm observed" },
+  { value: "mixed", label: "Outcome: mixed findings" },
+  { value: "unclear", label: "Outcome: unclear" },
+  { value: "not_appraised", label: "Not yet processed" },
+  { value: "full_text_unavailable", label: "Full text not accessible" },
 ];
 
 export default function Home() {
@@ -75,6 +128,9 @@ export default function Home() {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [appraising, setAppraising] = useState(false);
+  const [appraisalMessage, setAppraisalMessage] = useState("");
+  const [appraisalError, setAppraisalError] = useState("");
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -101,13 +157,72 @@ export default function Home() {
     }
   }
 
+  async function appraiseNextPaper() {
+    if (!result || appraising) return;
+    const next = result.records.find((record) => !record.full_text_appraisal);
+    if (!next) {
+      setAppraisalMessage("Every retrieved paper has been processed for full-text availability.");
+      return;
+    }
+    setAppraising(true);
+    setAppraisalError("");
+    setAppraisalMessage("");
+    try {
+      const response = await fetch(`${API}/api/appraise`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ record: next }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail = payload.detail || `Appraisal failed (${response.status})`;
+        throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      }
+      const key = String(next.pmcid || next.pmid || next.doi || next.title || "");
+      setResult((current) => current ? {
+        ...current,
+        records: current.records.map((record) =>
+          String(record.pmcid || record.pmid || record.doi || record.title || "") === key
+            ? { ...record, pmcid: payload.pmcid || record.pmcid, full_text_appraisal: payload }
+            : record
+        ),
+      } : current);
+      setAppraisalMessage(
+        payload.status === "appraised"
+          ? `Full-text appraisal completed: ${next.title}`
+          : `Separated from appraisable papers: ${next.title}. ${payload.reason || "Full text was not available."}`
+      );
+    } catch (err) {
+      setAppraisalError(err instanceof Error ? err.message : "Unable to complete full-text appraisal.");
+    } finally {
+      setAppraising(false);
+    }
+  }
+
   const filteredRecords = useMemo(() => {
     if (!result) return [];
     if (filter === "all") return result.records;
-    return result.records.filter((record) => (record.result_signal || "Unclear from abstract") === filter);
+    if (filter === "not_appraised") return result.records.filter((record) => !record.full_text_appraisal);
+    if (filter === "full_text_unavailable") return result.records.filter((record) =>
+      ["full_text_unavailable", "full_text_incomplete"].includes(record.full_text_appraisal?.status || "")
+    );
+    return result.records.filter((record) =>
+      (record.full_text_appraisal?.appraisal?.outcomes || []).some((outcome) => outcome.outcome_group === filter)
+    );
   }, [result, filter]);
 
   const visibleRecords = filteredRecords.slice(0, visibleCount);
+  const processedCount = result?.records.filter((record) => !!record.full_text_appraisal).length || 0;
+  const appraisedCount = result?.records.filter((record) => record.full_text_appraisal?.status === "appraised").length || 0;
+  const outcomeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const record of result?.records || []) {
+      for (const outcome of record.full_text_appraisal?.appraisal?.outcomes || []) {
+        counts[outcome.outcome_group] = (counts[outcome.outcome_group] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [result]);
 
   const timeline = useMemo(() => {
     if (!result) return [];
@@ -181,9 +296,36 @@ export default function Home() {
             <Metric label="Retrieval ceiling" value={result.requested_limit_per_source || 1000} detail="Per source for this search" />
           </div>
 
-          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-950">
-            <strong>Important appraisal boundary:</strong> {result.interpretation}
-          </div>
+          <section className="rounded-2xl border border-teal-200 bg-white p-5 sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xl font-bold">Full-text appraisal engine</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  {appraisedCount} appraised · {processedCount - appraisedCount} separated by full-text access · {result.records.length - processedCount} remaining
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Processes one paper per run to stay within free inference limits. Papers without reusable PMC full text are recorded separately.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={appraiseNextPaper}
+                disabled={appraising || processedCount >= result.records.length}
+                className="rounded-xl bg-teal-800 px-5 py-3 font-semibold text-white disabled:opacity-50"
+              >
+                {appraising ? "Retrieving and appraising…" : processedCount >= result.records.length ? "All papers processed" : "Appraise next paper"}
+              </button>
+            </div>
+            {appraisalMessage && <p className="mt-3 text-sm text-teal-800" role="status">{appraisalMessage}</p>}
+            {appraisalError && <p className="mt-3 text-sm text-red-700" role="alert">{appraisalError}</p>}
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+              <OutcomeCount label="Benefit" value={outcomeCounts.benefit || 0} />
+              <OutcomeCount label="No clear difference" value={outcomeCounts.no_clear_difference || 0} />
+              <OutcomeCount label="Harm" value={outcomeCounts.harm || 0} />
+              <OutcomeCount label="Mixed" value={outcomeCounts.mixed || 0} />
+              <OutcomeCount label="Unclear" value={outcomeCounts.unclear || 0} />
+            </div>
+          </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -253,11 +395,11 @@ export default function Home() {
               <div>
                 <h2 className="text-2xl font-bold">Study-by-study appraisal</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Sorted by study-design signal, then reported result signal, then publication year.
+                  Each outcome is grouped separately; one study can contribute to more than one finding group.
                 </p>
               </div>
               <label className="text-sm">
-                <span className="mb-1 block font-medium text-slate-700">Filter by reported result</span>
+                <span className="mb-1 block font-medium text-slate-700">Filter by full-text outcome finding</span>
                 <select
                   value={filter}
                   onChange={(e) => { setFilter(e.target.value); setVisibleCount(PAGE_SIZE); }}
@@ -277,7 +419,7 @@ export default function Home() {
               ))}
               {filteredRecords.length === 0 && (
                 <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
-                  No papers match this result-signal filter.
+                  No papers match this outcome group yet. Run full-text appraisal to populate the groups.
                 </div>
               )}
             </div>
@@ -362,57 +504,165 @@ function SummaryList({ title, values }: { title: string; values: Record<string, 
   );
 }
 
+function OutcomeCount({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg bg-slate-50 p-3">
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className="mt-1 text-xl font-bold tabular-nums text-slate-900">{value}</p>
+    </div>
+  );
+}
+
+function FindingLabel({ value }: { value: string }) {
+  const labels: Record<string, string> = {
+    benefit: "Benefit observed",
+    no_clear_difference: "No clear difference",
+    harm: "Harm observed",
+    mixed: "Mixed findings",
+    unclear: "Unclear",
+    not_reported: "Not reported",
+  };
+  const styles: Record<string, string> = {
+    benefit: "bg-emerald-50 text-emerald-800",
+    no_clear_difference: "bg-slate-100 text-slate-700",
+    harm: "bg-rose-50 text-rose-800",
+    mixed: "bg-amber-50 text-amber-900",
+    unclear: "bg-slate-100 text-slate-700",
+    not_reported: "bg-slate-100 text-slate-600",
+  };
+  return <span className={\`rounded-full px-2.5 py-1 text-xs font-semibold \${styles[value] || styles.unclear}\`}>{labels[value] || value}</span>;
+}
+
 function StudyCard({ record }: { record: RecordItem }) {
+  const result = record.full_text_appraisal;
+  const appraisal = result?.appraisal;
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <div className="mb-3 flex flex-wrap gap-2 text-xs font-semibold">
         <span className="rounded-full bg-teal-50 px-3 py-1 text-teal-900">{record.relevance_tier || "Relevance unclassified"}</span>
-        <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-900">{record.study_design || "Design unclear"} · provisional</span>
+        <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-900">{appraisal?.study_design_verified || record.study_design || "Design unclear"}</span>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">{record.year || "Year unavailable"}</span>
-        <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-900">Outcome not appraised</span>
+        {appraisal && <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-800">Full text appraised</span>}
+        {result?.status === "full_text_unavailable" && <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-900">Full text inaccessible</span>}
       </div>
       <h3 className="text-base font-semibold leading-snug text-slate-900">{record.title || "Title unavailable"}</h3>
       <p className="mt-2 text-sm text-slate-500">
         {[record.journal, record.sources?.join(" + ") || record.source].filter(Boolean).join(" · ")}
       </p>
-      {record.relevance_reasons && (
-        <p className="mt-2 text-xs text-slate-500">Relevance rationale: {record.relevance_reasons.join(" · ")}</p>
+      {record.relevance_reasons && <p className="mt-2 text-xs text-slate-500">Search relevance: {record.relevance_reasons.join(" · ")}</p>}
+
+      {appraisal ? (
+        <div className="mt-5 space-y-5">
+          <section>
+            <h4 className="text-sm font-bold text-slate-900">Study question and design</h4>
+            <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+              <div><dt className="font-semibold text-slate-500">Population</dt><dd className="text-slate-800">{appraisal.population || "Not clearly stated in extracted text"}</dd></div>
+              <div><dt className="font-semibold text-slate-500">Intervention / exposure</dt><dd className="text-slate-800">{appraisal.intervention || "Not reported"}</dd></div>
+              <div><dt className="font-semibold text-slate-500">Comparator</dt><dd className="text-slate-800">{appraisal.comparator || "Not reported"}</dd></div>
+              <div><dt className="font-semibold text-slate-500">Follow-up</dt><dd className="text-slate-800">{appraisal.follow_up || "Not reported"}</dd></div>
+            </dl>
+          </section>
+
+          <section>
+            <h4 className="text-sm font-bold text-slate-900">Outcome-by-outcome findings</h4>
+            <p className="mt-1 text-xs text-slate-500">Findings are classified per endpoint, not as a single verdict for the paper.</p>
+            <div className="mt-3 space-y-3">
+              {(appraisal.outcomes || []).map((outcome, index) => (
+                <div key={\`\${outcome.outcome}-\${index}\`} className="rounded-xl border border-slate-200 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h5 className="text-sm font-semibold text-slate-900">{outcome.outcome}</h5>
+                    <FindingLabel value={outcome.outcome_group} />
+                  </div>
+                  <p className="mt-2 text-sm text-slate-700">{outcome.clinical_interpretation || "Interpretation not clearly stated."}</p>
+                  <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                    {[
+                      ["Endpoint", outcome.endpoint], ["Timepoint", outcome.timepoint], ["Analyzed N", outcome.population_n],
+                      ["Events / summary", outcome.events_or_summary], ["Effect", [outcome.effect_measure, outcome.effect_estimate].filter(Boolean).join(": ")],
+                      ["95% CI", outcome.confidence_interval], ["P value", outcome.p_value], ["Statistical significance", outcome.statistical_significance],
+                    ].filter(([, value]) => !!value).map(([label, value]) => (
+                      <div key={label as string} className="rounded-lg bg-slate-50 p-2">
+                        <p className="font-semibold text-slate-500">{label}</p><p className="mt-1 text-slate-800">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {(outcome.evidence_quotes || []).map((quote, quoteIndex) => (
+                    <blockquote key={quoteIndex} className="mt-3 border-l-2 border-teal-300 pl-3 text-xs leading-relaxed text-slate-600">
+                      “{quote.excerpt}” <span className="font-semibold">— {quote.section}{quote.location ? \`, \${quote.location}\` : ""}</span>
+                    </blockquote>
+                  ))}
+                </div>
+              ))}
+              {(!appraisal.outcomes || appraisal.outcomes.length === 0) && <p className="text-sm text-slate-600">No extractable outcome estimates were identified in the returned full-text sections.</p>}
+            </div>
+          </section>
+
+          <section>
+            <h4 className="text-sm font-bold text-slate-900">Overall interpretation</h4>
+            <p className="mt-2 text-sm leading-relaxed text-slate-700">{appraisal.main_findings || "No integrated interpretation was returned."}</p>
+            <p className="mt-2 text-sm leading-relaxed text-slate-600">{appraisal.methods_assessment}</p>
+          </section>
+
+          <section className="rounded-xl bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-bold text-slate-900">Risk-of-bias appraisal</h4>
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                {appraisal.risk_of_bias?.tool || "Design-specific framework"} · {appraisal.risk_of_bias?.overall_judgement || "Not assessable"}
+              </span>
+            </div>
+            <div className="mt-3 space-y-3">
+              {(appraisal.risk_of_bias?.domains || []).map((domain, index) => (
+                <div key={\`\${domain.domain}-\${index}\`} className="border-t border-slate-200 pt-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-800">{domain.domain}</p>
+                    <span className="text-xs font-bold uppercase tracking-wide text-slate-600">{domain.judgement.replaceAll("_", " ")}</span>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-600">{domain.rationale}</p>
+                  {(domain.evidence_quotes || []).map((quote, quoteIndex) => (
+                    <blockquote key={quoteIndex} className="mt-2 border-l-2 border-slate-300 pl-3 text-xs text-slate-500">
+                      “{quote.excerpt}” — {quote.section}
+                    </blockquote>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-xs leading-relaxed text-slate-500">{appraisal.risk_of_bias?.note}</p>
+            {appraisal.framework_url && <a className="mt-2 inline-block text-sm font-semibold text-teal-800 underline" href={appraisal.framework_url} target="_blank" rel="noreferrer">Open official appraisal framework</a>}
+            {appraisal.framework_note && <p className="mt-1 text-xs text-slate-500">{appraisal.framework_note}</p>}
+          </section>
+
+          {appraisal.limitations_reported && appraisal.limitations_reported.length > 0 && (
+            <section>
+              <h4 className="text-sm font-bold text-slate-900">Limitations acknowledged by authors</h4>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">{appraisal.limitations_reported.map((item, index) => <li key={index}>{item}</li>)}</ul>
+            </section>
+          )}
+          <p className="text-xs text-slate-500">
+            Funding / conflicts: {appraisal.funding_and_conflicts || "Not identified in extracted text"} ·
+            Verified source excerpts: {appraisal.evidence_integrity?.verified_excerpt_count ?? 0}
+            {appraisal.license ? \` · Licence: \${appraisal.license}\` : ""}
+          </p>
+          {appraisal.appraisal_warnings && appraisal.appraisal_warnings.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              {appraisal.appraisal_warnings.join(" · ")}
+            </div>
+          )}
+        </div>
+      ) : result?.status === "full_text_unavailable" || result?.status === "full_text_incomplete" ? (
+        <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <h4 className="text-sm font-semibold text-amber-950">Separated from full-text appraisal</h4>
+          <p className="mt-1 text-sm text-amber-900">{result.reason || "Full text could not be retrieved from the open repository."}</p>
+        </div>
+      ) : (
+        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <h4 className="text-sm font-semibold text-slate-900">Queued for full-text appraisal</h4>
+          <p className="mt-1 text-sm text-slate-600">Use “Appraise next paper” above to retrieve the full text and extract its outcomes and risk-of-bias domains.</p>
+        </div>
       )}
-
-      <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
-        <h4 className="text-sm font-semibold text-amber-950">Full-text appraisal pending</h4>
-        <p className="mt-1 text-sm leading-relaxed text-amber-950">
-          This record is currently being shown for literature discovery and relevance screening.
-          We have not yet verified its outcome estimates, strengths, limitations, or risk of bias
-          from the complete article. No favorable or unfavorable conclusion is assigned.
-        </p>
-        {record.full_text_status && (
-          <p className="mt-2 text-xs leading-relaxed text-amber-900">{record.full_text_status}</p>
-        )}
-      </div>
-
-      <div className="mt-4 rounded-xl bg-slate-50 p-4">
-        <h4 className="text-sm font-semibold text-slate-800">Provisional appraisal framework</h4>
-        <p className="mt-1 text-sm font-semibold text-slate-800">
-          {record.recommended_appraisal_tool || "Manual design confirmation required"}
-        </p>
-        <p className="mt-1 text-sm leading-relaxed text-slate-600">
-          {record.appraisal_tool_note || "Confirm the study design from the complete Methods section before using an appraisal tool."}
-        </p>
-        {record.appraisal_tool_url && (
-          <a className="mt-2 inline-block text-sm font-semibold text-teal-800 underline" href={record.appraisal_tool_url} target="_blank" rel="noreferrer">
-            Open official appraisal resource
-          </a>
-        )}
-        <p className="mt-2 text-xs text-slate-500">
-          This is a tool recommendation only. No risk-of-bias questionnaire has been completed or scored.
-        </p>
-      </div>
 
       <div className="mt-4 flex flex-wrap gap-4 text-sm">
         {record.url && <a className="font-semibold text-teal-800 underline" href={record.url} target="_blank" rel="noreferrer">Open publication</a>}
-        {record.doi && <a className="text-slate-600 underline" href={`https://doi.org/${record.doi}`} target="_blank" rel="noreferrer">DOI: {record.doi}</a>}
-        {record.pmcid && <a className="text-slate-600 underline" href={`https://pmc.ncbi.nlm.nih.gov/articles/${record.pmcid}/`} target="_blank" rel="noreferrer">Open PMC full text (check licence)</a>}
+        {record.doi && <a className="text-slate-600 underline" href={\`https://doi.org/\${record.doi}\`} target="_blank" rel="noreferrer">DOI: {record.doi}</a>}
+        {(record.pmcid || result?.pmcid) && <a className="text-slate-600 underline" href={\`https://pmc.ncbi.nlm.nih.gov/articles/\${result?.pmcid || record.pmcid}/\`} target="_blank" rel="noreferrer">Open PMC full text</a>}
       </div>
     </article>
   );
