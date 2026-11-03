@@ -409,6 +409,20 @@ export default function Home() {
                 <p className="mt-1 text-xs text-slate-500">
                   Automatically checks every eligible paper in sequence. Records missing a required search concept are excluded before appraisal; papers without reusable PMC full text are separated. If the free inference quota is reached, the queue pauses and can be resumed.
                 </p>
+                <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+                    Simple guide: run free appraisal in Google Colab (no coding needed)
+                  </summary>
+                  <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-slate-600">
+                    <li>Tap <strong>Export for free Colab</strong> below. Keep the downloaded file.</li>
+                    <li>Open the <a className="font-semibold text-teal-800 underline" href="https://colab.research.google.com/github/vishnuvcr/onco-evidence-ai/blob/main/colab/OncoEvidence_AI_Free_FullText_Appraisal.ipynb" target="_blank" rel="noreferrer">OncoEvidence AI Colab notebook</a>.</li>
+                    <li>Sign in to Google. If offered, choose Runtime → Change runtime type → GPU.</li>
+                    <li>Press the ▶ button beside the large code cell. When asked, select the file you exported.</li>
+                    <li>Allow Google Drive access. Wait for the results file to download.</li>
+                    <li>Return here and tap <strong>Import Colab results</strong>. Select the downloaded results file.</li>
+                  </ol>
+                  <p className="mt-3 text-xs text-slate-500">If Colab stops, reopen the same notebook, run the same cell again, and upload the same search export. Completed papers are saved in Google Drive and skipped when resuming. Free GPU availability is not guaranteed.</p>
+                </details>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={exportForColab}
