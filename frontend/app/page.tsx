@@ -159,41 +159,46 @@ export default function Home() {
 
   async function appraiseNextPaper() {
     if (!result || appraising) return;
-    const next = result.records.find((record) => !record.full_text_appraisal);
-    if (!next) {
-      setAppraisalMessage("Every retrieved paper has been processed for full-text availability.");
-      return;
-    }
+    const workingRecords = [...result.records];
+    const batchSize = 5;
+    let processedThisBatch = 0;
     setAppraising(true);
     setAppraisalError("");
     setAppraisalMessage("");
     try {
-      const response = await fetch(`${API}/api/appraise`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ record: next }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const detail = payload.detail || `Appraisal failed (${response.status})`;
-        throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      while (processedThisBatch < batchSize) {
+        const index = workingRecords.findIndex((record) => !record.full_text_appraisal);
+        if (index < 0) break;
+        const next = workingRecords[index];
+        setAppraisalMessage(`Appraising paper ${processedThisBatch + 1} of ${batchSize}: ${next.title}`);
+        const response = await fetch(`${API}/api/appraise`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ record: next }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const detail = payload.detail || `Appraisal failed (${response.status})`;
+          throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        }
+        workingRecords[index] = {
+          ...next,
+          pmcid: payload.pmcid || next.pmcid,
+          full_text_appraisal: payload,
+        };
+        setResult((current) => current ? { ...current, records: [...workingRecords] } : current);
+        processedThisBatch += 1;
       }
-      const key = String(next.pmcid || next.pmid || next.doi || next.title || "");
-      setResult((current) => current ? {
-        ...current,
-        records: current.records.map((record) =>
-          String(record.pmcid || record.pmid || record.doi || record.title || "") === key
-            ? { ...record, pmcid: payload.pmcid || record.pmcid, full_text_appraisal: payload }
-            : record
-        ),
-      } : current);
+      const totalProcessed = workingRecords.filter((record) => !!record.full_text_appraisal).length;
+      const totalAppraised = workingRecords.filter((record) => record.full_text_appraisal?.status === "appraised").length;
+      const totalRemaining = workingRecords.length - totalProcessed;
       setAppraisalMessage(
-        payload.status === "appraised"
-          ? `Full-text appraisal completed: ${next.title}`
-          : `Separated from appraisable papers: ${next.title}. ${payload.reason || "Full text was not available."}`
+        totalRemaining === 0
+          ? `Queue complete: ${totalAppraised} papers appraised; ${totalProcessed - totalAppraised} separated because reusable full text was unavailable or incomplete.`
+          : `Batch complete: ${processedThisBatch} processed. ${totalAppraised} appraised, ${totalProcessed - totalAppraised} separated, ${totalRemaining} remaining. Select “Appraise next papers” to continue.`
       );
     } catch (err) {
-      setAppraisalError(err instanceof Error ? err.message : "Unable to complete full-text appraisal.");
+      setAppraisalError(err instanceof Error ? err.message : "Unable to complete full-text appraisal. Previously completed papers have been saved in this view.");
     } finally {
       setAppraising(false);
     }
@@ -304,7 +309,7 @@ export default function Home() {
                   {appraisedCount} appraised · {processedCount - appraisedCount} separated by full-text access · {result.records.length - processedCount} remaining
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  Processes one paper per run to stay within free inference limits. Papers without reusable PMC full text are recorded separately.
+                  Processes up to five papers sequentially per run to stay within free inference limits. Papers without reusable PMC full text are recorded separately.
                 </p>
               </div>
               <button
@@ -313,7 +318,7 @@ export default function Home() {
                 disabled={appraising || processedCount >= result.records.length}
                 className="rounded-xl bg-teal-800 px-5 py-3 font-semibold text-white disabled:opacity-50"
               >
-                {appraising ? "Retrieving and appraising…" : processedCount >= result.records.length ? "All papers processed" : "Appraise next paper"}
+                {appraising ? "Retrieving and appraising…" : processedCount >= result.records.length ? "All papers processed" : "Appraise next papers"}
               </button>
             </div>
             {appraisalMessage && <p className="mt-3 text-sm text-teal-800" role="status">{appraisalMessage}</p>}
