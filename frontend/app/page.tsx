@@ -160,17 +160,18 @@ export default function Home() {
   async function appraiseNextPaper() {
     if (!result || appraising) return;
     const workingRecords = [...result.records];
-    const batchSize = 5;
-    let processedThisBatch = 0;
+    const alreadyProcessed = workingRecords.filter((record) => !!record.full_text_appraisal).length;
+    let processedThisRun = 0;
     setAppraising(true);
     setAppraisalError("");
     setAppraisalMessage("");
     try {
-      while (processedThisBatch < batchSize) {
+      while (true) {
         const index = workingRecords.findIndex((record) => !record.full_text_appraisal);
         if (index < 0) break;
         const next = workingRecords[index];
-        setAppraisalMessage(`Appraising paper ${processedThisBatch + 1} of ${batchSize}: ${next.title}`);
+        const queuePosition = alreadyProcessed + processedThisRun + 1;
+        setAppraisalMessage(`Processing paper ${queuePosition} of ${workingRecords.length}: ${next.title}`);
         const response = await fetch(`${API}/api/appraise`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -179,6 +180,9 @@ export default function Home() {
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
           const detail = payload.detail || `Appraisal failed (${response.status})`;
+          if (response.status === 429) {
+            throw new Error(`Groq free-tier quota/rate limit reached after ${processedThisRun} papers in this run. Completed results are retained. Wait for the quota window to reset, then press “Resume all results” to continue. Provider message: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
+          }
           throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
         }
         workingRecords[index] = {
@@ -187,18 +191,25 @@ export default function Home() {
           full_text_appraisal: payload,
         };
         setResult((current) => current ? { ...current, records: [...workingRecords] } : current);
-        processedThisBatch += 1;
+        processedThisRun += 1;
+        const completed = workingRecords.filter((record) => !!record.full_text_appraisal).length;
+        const appraised = workingRecords.filter((record) => record.full_text_appraisal?.status === "appraised").length;
+        setAppraisalMessage(`Processed ${completed} of ${workingRecords.length} papers · ${appraised} full-text appraisals completed · ${workingRecords.length - completed} remaining.`);
+        // Small spacing between successful model calls to avoid needlessly hitting free-tier RPM limits.
+        if (payload.status === "appraised" && workingRecords.some((record) => !record.full_text_appraisal)) {
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+        }
       }
       const totalProcessed = workingRecords.filter((record) => !!record.full_text_appraisal).length;
       const totalAppraised = workingRecords.filter((record) => record.full_text_appraisal?.status === "appraised").length;
       const totalRemaining = workingRecords.length - totalProcessed;
       setAppraisalMessage(
         totalRemaining === 0
-          ? `Queue complete: ${totalAppraised} papers appraised; ${totalProcessed - totalAppraised} separated because reusable full text was unavailable or incomplete.`
-          : `Batch complete: ${processedThisBatch} processed. ${totalAppraised} appraised, ${totalProcessed - totalAppraised} separated, ${totalRemaining} remaining. Select “Appraise next papers” to continue.`
+          ? `Queue complete: all ${workingRecords.length} retrieved papers checked. ${totalAppraised} received full-text appraisal; ${totalProcessed - totalAppraised} were separated because reusable full text was unavailable or incomplete.`
+          : `Processed ${processedThisRun} papers in this run. ${totalAppraised} appraised, ${totalProcessed - totalAppraised} separated, ${totalRemaining} remaining.`
       );
     } catch (err) {
-      setAppraisalError(err instanceof Error ? err.message : "Unable to complete full-text appraisal. Previously completed papers have been saved in this view.");
+      setAppraisalError(err instanceof Error ? err.message : "Unable to complete full-text appraisal. Completed papers remain available in this view.");
     } finally {
       setAppraising(false);
     }
@@ -274,7 +285,7 @@ export default function Home() {
           <div className="mt-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <span className="text-xs text-slate-500">PubMed + Europe PMC · Up to 1,000 records per source</span>
             <button
-              disabled={loading || question.trim().length < 5}
+              disabled={loading || appraising || question.trim().length < 5}
               className="rounded-xl bg-teal-800 px-6 py-3 font-semibold text-white disabled:opacity-50"
             >
               {loading ? "Searching up to 1,000 per source…" : "Search evidence"}
@@ -309,7 +320,7 @@ export default function Home() {
                   {appraisedCount} appraised · {processedCount - appraisedCount} separated by full-text access · {result.records.length - processedCount} remaining
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  Processes up to five papers sequentially per run to stay within free inference limits. Papers without reusable PMC full text are recorded separately.
+                  Automatically checks every retrieved paper in sequence. Papers without reusable PMC full text are separated; if the free inference quota is reached, the queue pauses and can be resumed.
                 </p>
               </div>
               <button
@@ -318,7 +329,7 @@ export default function Home() {
                 disabled={appraising || processedCount >= result.records.length}
                 className="rounded-xl bg-teal-800 px-5 py-3 font-semibold text-white disabled:opacity-50"
               >
-                {appraising ? "Retrieving and appraising…" : processedCount >= result.records.length ? "All papers processed" : "Appraise next papers"}
+                {appraising ? "Processing all results…" : processedCount >= result.records.length ? "All papers processed" : processedCount > 0 ? "Resume all results" : "Appraise all results"}
               </button>
             </div>
             {appraisalMessage && <p className="mt-3 text-sm text-teal-800" role="status">{appraisalMessage}</p>}
