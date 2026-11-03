@@ -394,10 +394,15 @@ def deduplicate(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 existing.get("sources", [existing.get("source", "")]) +
                 record.get("sources", [record.get("source", "")])
             ))
-            if len(record.get("abstract", "")) > len(existing.get("abstract", "")):
-                result[index] = {**record, "sources": [s for s in sources if s]}
-            else:
-                existing["sources"] = [s for s in sources if s]
+            preferred = record if len(record.get("abstract", "")) > len(existing.get("abstract", "")) else existing
+            supplemental = existing if preferred is record else record
+            merged = {**supplemental, **preferred}
+            for field in ("pmid", "doi", "pmcid", "journal", "year", "publication_types",
+                          "is_open_access", "cited_by_count", "url"):
+                if not merged.get(field) and supplemental.get(field):
+                    merged[field] = supplemental[field]
+            merged["sources"] = [s for s in sources if s]
+            result[index] = merged
             continue
         record["sources"] = [record.get("source", "")]
         seen[key] = len(result)
