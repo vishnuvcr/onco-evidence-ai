@@ -240,8 +240,10 @@ async def appraise_full_text(record: dict[str, Any]) -> dict[str, Any]:
         if len(full["body"]) < 1200:
             return {"status": "full_text_incomplete", "reason": "Retrieved full text is too short for appraisal.", "pmcid": pmcid, "record_key": get_key(record)}
         paper = {**record, "pmcid": pmcid}
-        design = appraise_abstract(paper).get("study_design", "Unclear from abstract")
-        recommendation = recommend_appraisal_tool(paper, design)
+        # Re-check the design using the retrieved Methods/Results text, not just the abstract.
+        design_record = {**paper, "abstract": (full["abstract"] + "\n" + full["body"])}
+        design = appraise_abstract(design_record).get("study_design", "Unclear from full text")
+        recommendation = recommend_appraisal_tool(design_record, design)
         tool = recommendation.get("recommended_appraisal_tool", "JBI")
         data = await call_groq(client, paper, full, tool, domains_for(tool))
         source = full["title"] + "\n" + full["abstract"] + "\n" + full["body"]
