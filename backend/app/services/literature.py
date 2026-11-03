@@ -159,7 +159,8 @@ def build_search_queries(question: str) -> dict[str, str]:
         None,
     )
     if re.search(r"\brt\b", normalised) and rt_concept and rt_concept not in matched:
-        matched.append(rt_concept)
+        rt_with_abbreviation = {**rt_concept, "triggers": tuple(rt_concept["triggers"]) + ("rt",)}
+        matched.append(rt_with_abbreviation)
 
     groups_pubmed = [f"({item['pubmed']})" for item in matched]
     groups_epmc = [f"({item['europe_pmc']})" for item in matched]
@@ -453,13 +454,20 @@ RADIOTHERAPY_MATCH_TERMS = (
 )
 
 
+def _contains_search_term(text: str, term: str) -> bool:
+    # Very short terms such as RT must match as whole tokens, not substrings.
+    if len(term) <= 2:
+        return bool(re.search(r"\\b" + re.escape(term) + r"\\b", text))
+    return term in text
+
+
 def _missing_required_concepts(record: dict[str, Any], groups: list[dict[str, Any]]) -> list[str]:
     """Return explicit query concepts absent from both title and abstract metadata."""
     text = _normalise(f"{record.get('title', '')} {record.get('abstract', '')}")
     missing: list[str] = []
     for group in groups:
         terms = [_normalise(str(term)) for term in group.get("terms", []) if term]
-        if terms and not any(term in text for term in terms):
+        if terms and not any(_contains_search_term(text, term) for term in terms):
             missing.append(str(group.get("label") or "required topic"))
     return missing
 
@@ -478,8 +486,8 @@ def _relevance_assessment(
     missing: list[str] = []
     for group in required_groups:
         terms = [_normalise(str(term)) for term in group.get("terms", []) if term]
-        title_hit = any(term in title for term in terms)
-        combined_hit = any(term in combined for term in terms)
+        title_hit = any(_contains_search_term(title, term) for term in terms)
+        combined_hit = any(_contains_search_term(combined, term) for term in terms)
         title_matches += int(title_hit)
         abstract_matches += int(combined_hit)
         if not combined_hit:
