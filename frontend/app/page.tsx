@@ -111,6 +111,60 @@ type SearchResult = {
   queries?: { pubmed?: string; europe_pmc?: string };
 };
 
+
+const SAVED_SEARCH_DB = "oncoevidence-ai-browser";
+const SAVED_SEARCH_STORE = "saved";
+const SAVED_SEARCH_KEY = "latest-search";
+
+function loadSavedSearch(): Promise<SearchResult | null> {
+  if (typeof window === "undefined" || !window.indexedDB) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const request = window.indexedDB.open(SAVED_SEARCH_DB, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(SAVED_SEARCH_STORE)) db.createObjectStore(SAVED_SEARCH_STORE);
+    };
+    request.onerror = () => resolve(null);
+    request.onsuccess = () => {
+      const db = request.result;
+      try {
+        const transaction = db.transaction(SAVED_SEARCH_STORE, "readonly");
+        const get = transaction.objectStore(SAVED_SEARCH_STORE).get(SAVED_SEARCH_KEY);
+        get.onsuccess = () => { db.close(); resolve((get.result as SearchResult | undefined) || null); };
+        get.onerror = () => { db.close(); resolve(null); };
+      } catch {
+        db.close();
+        resolve(null);
+      }
+    };
+  });
+}
+
+function saveSearchInBrowser(result: SearchResult): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) return Promise.resolve();
+  return new Promise((resolve) => {
+    const request = window.indexedDB.open(SAVED_SEARCH_DB, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(SAVED_SEARCH_STORE)) db.createObjectStore(SAVED_SEARCH_STORE);
+    };
+    request.onerror = () => resolve();
+    request.onsuccess = () => {
+      const db = request.result;
+      try {
+        const transaction = db.transaction(SAVED_SEARCH_STORE, "readwrite");
+        transaction.objectStore(SAVED_SEARCH_STORE).put(result, SAVED_SEARCH_KEY);
+        transaction.oncomplete = () => { db.close(); resolve(); };
+        transaction.onerror = () => { db.close(); resolve(); };
+        transaction.onabort = () => { db.close(); resolve(); };
+      } catch {
+        db.close();
+        resolve();
+      }
+    };
+  });
+}
+
 const API = process.env.NEXT_PUBLIC_API_URL || "https://onco-evidence-ai.onrender.com";
 const PAGE_SIZE = 50;
 
@@ -135,8 +189,20 @@ export default function Home() {
   const [appraising, setAppraising] = useState(false);
   const [appraisalMessage, setAppraisalMessage] = useState("");
   const [appraisalError, setAppraisalError] = useState("");
-  const [colabMessage, setColabMessage] = useState("");
-  const [colabError, setColabError] = useState("");
+  const [restoring, setRestoring] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    loadSavedSearch().then((saved) => {
+      if (active && saved) {
+        setResult(saved);
+        setQuestion(saved.question || "");
+      }
+    }).finally(() => {
+      if (active) setRestoring(false);
+    });
+    return () => { active = false; };
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -155,67 +221,13 @@ export default function Home() {
         const detail = await response.text();
         throw new Error(`Search failed (${response.status}): ${detail.slice(0, 220)}`);
       }
-      setResult(await response.json());
+      const searchResult = await response.json() as SearchResult;
+      setResult(searchResult);
+      await saveSearchInBrowser(searchResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to search. Check the API server.");
     } finally {
       setLoading(false);
-    }
-  }
-
-  function exportForColab() {
-    if (!result) return;
-    const payload = {
-      export_format: "oncoevidence-colab-v1",
-      exported_at: new Date().toISOString(),
-      ...result,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "oncoevidence_colab_input.json";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-    setColabMessage("Search exported. Upload this JSON into the OncoEvidence AI Colab notebook.");
-  }
-
-  async function importColabResults(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file || !result) return;
-    setColabMessage("");
-    setColabError("");
-    try {
-      const payload = JSON.parse(await file.text()) as { records?: RecordItem[]; inference_engine?: string };
-      if (!Array.isArray(payload.records)) throw new Error("This file does not contain a records[] array.");
-      const imported = new Map<string, RecordItem>();
-      for (const record of payload.records) {
-        [record.pmcid, record.pmid, record.doi, record.title]
-          .filter(Boolean)
-          .forEach((key) => imported.set(String(key).toLowerCase(), record));
-      }
-      let matched = 0;
-      const records = result.records.map((current) => {
-        const keys = [current.pmcid, current.pmid, current.doi, current.title]
-          .filter(Boolean).map((key) => String(key).toLowerCase());
-        const found = keys.map((key) => imported.get(key)).find(Boolean);
-        if (!found?.full_text_appraisal) return current;
-        matched += 1;
-        return {
-          ...current,
-          pmcid: found.pmcid || current.pmcid,
-          full_text_appraisal: found.full_text_appraisal,
-        };
-      });
-      if (!matched) throw new Error("No records matched this search. Import the result file generated from this exact search export.");
-      setResult({ ...result, records });
-      setColabMessage(`Imported ${matched} Colab appraisal results into this search.`);
-    } catch (err) {
-      setColabError(err instanceof Error ? err.message : "Unable to import Colab results.");
-    } finally {
-      event.target.value = "";
     }
   }
 
@@ -252,7 +264,9 @@ export default function Home() {
           pmcid: payload.pmcid || next.pmcid,
           full_text_appraisal: payload,
         };
-        setResult((current) => current ? { ...current, records: [...workingRecords] } : current);
+        const updatedResult = { ...result, records: [...workingRecords] };
+        setResult(updatedResult);
+        await saveSearchInBrowser(updatedResult);
         processedThisRun += 1;
         const completed = workingRecords.filter((record) => !!record.full_text_appraisal).length;
         const appraised = workingRecords.filter((record) => record.full_text_appraisal?.status === "appraised").length;
@@ -357,6 +371,10 @@ export default function Home() {
         {error && <p role="alert" className="mt-4 text-sm text-red-700">{error}</p>}
       </section>
 
+      {restoring && (
+        <p className="mt-3 text-xs text-slate-500" role="status">Restoring your last search from this browser…</p>
+      )}
+
       {loading && (
         <p className="mt-5 text-sm text-slate-600" role="status">
           Searching both databases and organizing the returned records. Large searches may take longer.
@@ -410,42 +428,23 @@ export default function Home() {
                 <p className="mt-1 text-xs text-slate-500">
                   Automatically checks every eligible paper in sequence. Records missing a required search concept are excluded before appraisal; papers without reusable PMC full text are separated. If the free inference quota is reached, the queue pauses and can be resumed.
                 </p>
-                <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-                    Simple guide: run free appraisal in Google Colab (no coding needed)
-                  </summary>
-                  <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-slate-600">
-                    <li>Tap <strong>Export for free Colab</strong> below. Keep the downloaded file.</li>
-                    <li>Open the <a className="font-semibold text-teal-800 underline" href="https://colab.research.google.com/github/vishnuvcr/onco-evidence-ai/blob/main/colab/OncoEvidence_AI_Free_FullText_Appraisal.ipynb" target="_blank" rel="noreferrer">OncoEvidence AI Colab notebook</a>.</li>
-                    <li>Sign in to Google. If offered, choose Runtime → Change runtime type → GPU.</li>
-                    <li>Press the ▶ button beside the large code cell. When asked, select the file you exported.</li>
-                    <li>Allow Google Drive access. Wait for the results file to download.</li>
-                    <li>Return here and tap <strong>Import Colab results</strong>. Select the downloaded results file.</li>
-                  </ol>
-                  <p className="mt-3 text-xs text-slate-500">If Colab stops, reopen the same notebook, run the same cell again, and upload the same search export. Completed papers are saved in Google Drive and skipped when resuming. Free GPU availability is not guaranteed.</p>
-                </details>
+                <p className="mt-3 text-xs text-slate-500">
+                  Full-text retrieval and AI appraisal run through this website. No Colab account, file export, API key, or manual import is required.
+                  Completed papers are saved in this browser, so you can return later and resume. Keep this page open while the queue is actively processing.
+                </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={exportForColab}
-                  className="rounded-xl border border-teal-800 px-4 py-3 text-sm font-semibold text-teal-900 hover:bg-teal-50">
-                  Export for free Colab
-                </button>
-                <label className="cursor-pointer rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                  Import Colab results
-                  <input type="file" accept=".json,application/json" onChange={importColabResults} className="hidden" />
-                </label>
                 <button
-                type="button"
-                onClick={appraiseNextPaper}
-                disabled={appraising || processedCount >= result.records.length}
-                className="rounded-xl bg-teal-800 px-5 py-3 font-semibold text-white disabled:opacity-50"
-              >
-                {appraising ? "Processing all results…" : processedCount >= result.records.length ? "All papers processed" : processedCount > 0 ? "Resume all results" : "Appraise all results"}
-              </button>
+                  type="button"
+                  onClick={appraiseNextPaper}
+                  disabled={appraising || processedCount >= result.records.length}
+                  className="rounded-xl bg-teal-800 px-5 py-3 font-semibold text-white disabled:opacity-50"
+                >
+                  {appraising ? "Processing all results…" : processedCount >= result.records.length ? "All papers processed" : processedCount > 0 ? "Resume all results" : "Appraise all results"}
+                </button>
+              </div>
             </div>
             {appraisalMessage && <p className="mt-3 text-sm text-teal-800" role="status">{appraisalMessage}</p>}
-            {colabMessage && <p className="mt-2 text-sm text-teal-800" role="status">{colabMessage}</p>}
-            {colabError && <p className="mt-2 text-sm text-red-700" role="alert">{colabError}</p>}
             {appraisalError && <p className="mt-3 text-sm text-red-700" role="alert">{appraisalError}</p>}
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
               <OutcomeCount label="Benefit" value={outcomeCounts.benefit || 0} />
