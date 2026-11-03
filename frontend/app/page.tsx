@@ -135,6 +135,8 @@ export default function Home() {
   const [appraising, setAppraising] = useState(false);
   const [appraisalMessage, setAppraisalMessage] = useState("");
   const [appraisalError, setAppraisalError] = useState("");
+  const [colabMessage, setColabMessage] = useState("");
+  const [colabError, setColabError] = useState("");
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -158,6 +160,61 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "Unable to search. Check the API server.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  function exportForColab() {
+    if (!result) return;
+    const payload = {
+      export_format: "oncoevidence-colab-v1",
+      exported_at: new Date().toISOString(),
+      ...result,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "oncoevidence_colab_input.json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setColabMessage("Search exported. Upload this JSON into the OncoEvidence AI Colab notebook.");
+  }
+
+  async function importColabResults(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file || !result) return;
+    setColabMessage("");
+    setColabError("");
+    try {
+      const payload = JSON.parse(await file.text()) as { records?: RecordItem[]; inference_engine?: string };
+      if (!Array.isArray(payload.records)) throw new Error("This file does not contain a records[] array.");
+      const imported = new Map<string, RecordItem>();
+      for (const record of payload.records) {
+        const key = record.pmcid || record.pmid || record.doi || record.title;
+        if (key) imported.set(String(key).toLowerCase(), record);
+      }
+      let matched = 0;
+      const records = result.records.map((current) => {
+        const keys = [current.pmcid, current.pmid, current.doi, current.title]
+          .filter(Boolean).map((key) => String(key).toLowerCase());
+        const found = keys.map((key) => imported.get(key)).find(Boolean);
+        if (!found?.full_text_appraisal) return current;
+        matched += 1;
+        return {
+          ...current,
+          pmcid: found.pmcid || current.pmcid,
+          full_text_appraisal: found.full_text_appraisal,
+        };
+      });
+      if (!matched) throw new Error("No records matched this search. Import the result file generated from this exact search export.");
+      setResult({ ...result, records });
+      setColabMessage(`Imported ${matched} Colab appraisal results into this search.`);
+    } catch (err) {
+      setColabError(err instanceof Error ? err.message : "Unable to import Colab results.");
+    } finally {
+      event.target.value = "";
     }
   }
 
@@ -353,7 +410,16 @@ export default function Home() {
                   Automatically checks every eligible paper in sequence. Records missing a required search concept are excluded before appraisal; papers without reusable PMC full text are separated. If the free inference quota is reached, the queue pauses and can be resumed.
                 </p>
               </div>
-              <button
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={exportForColab}
+                  className="rounded-xl border border-teal-800 px-4 py-3 text-sm font-semibold text-teal-900 hover:bg-teal-50">
+                  Export for free Colab
+                </button>
+                <label className="cursor-pointer rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  Import Colab results
+                  <input type="file" accept=".json,application/json" onChange={importColabResults} className="hidden" />
+                </label>
+                <button
                 type="button"
                 onClick={appraiseNextPaper}
                 disabled={appraising || processedCount >= result.records.length}
@@ -363,6 +429,8 @@ export default function Home() {
               </button>
             </div>
             {appraisalMessage && <p className="mt-3 text-sm text-teal-800" role="status">{appraisalMessage}</p>}
+            {colabMessage && <p className="mt-2 text-sm text-teal-800" role="status">{colabMessage}</p>}
+            {colabError && <p className="mt-2 text-sm text-red-700" role="alert">{colabError}</p>}
             {appraisalError && <p className="mt-3 text-sm text-red-700" role="alert">{appraisalError}</p>}
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
               <OutcomeCount label="Benefit" value={outcomeCounts.benefit || 0} />
